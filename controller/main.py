@@ -51,7 +51,8 @@ class Session:
         self.link = link.Link(("registry", 5000), 200)
         self.settings = {"scenario": "traffic", "lanes": ["docker", "mitrafsnap"],
                          "mode": "live", "link_mbit": 200, "cpus": 2, "threads": 2,
-                         "watch_interval": "1s", "auto_watch": False, "cold_build": True}
+                         "watch_interval": "1s", "auto_watch": False, "cold_build": True,
+                         "device": "auto"}
         self.settings["scn"] = scenario.load(self.settings["scenario"])
         self.methods = {M.key: M(i, self.bus, self.link, self.settings)
                         for i, M in enumerate(methods.METHODS)}
@@ -122,9 +123,11 @@ class Session:
     async def act_prepare(self):
         scn = self.settings["scn"]
         await scenario.fetch_assets(scn, self.bus.emit)
-        methods.BASE_TAG = methods.lane_hash()
+        dev = methods.device(self.settings["device"])
+        self.settings["effective_device"] = dev
+        methods.BASE_TAG = methods.base_tag(dev)
         if not await asyncio.to_thread(methods.base_ready):
-            await methods.prepare_base(LANE_DIR, self.bus.emit)
+            await methods.prepare_base(LANE_DIR, self.bus.emit, dev)
         for v in scn["versions"]:
             scenario.materialize(scn, v)
         src = scn["frames"]
@@ -290,7 +293,8 @@ async def info(request):
     scn = s.settings["scn"]
     return web.json_response({
         "backend": {"arch": platform.machine(), "kernel": platform.release(),
-                    "cpus": os.cpu_count(), "token": bool(TOKEN)},
+                    "cpus": os.cpu_count(), "token": bool(TOKEN),
+                    "gpu": methods.gpu_available()},
         "scenarios": scenario.available(),
         "scenario": {k: scn[k] for k in ("name", "title", "description", "slots",
                                          "docker_order", "select")} | {
@@ -313,8 +317,15 @@ async def settings(request):
     if s.act:
         return web.json_response({"error": f"act {s.act} is running"}, status=409)
     body = await request.json()
+    if "device" in body:
+        try:
+            dev = methods.device(body["device"])
+        except RuntimeError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        if dev != s.settings.get("effective_device"):
+            s.prepared = False   # the lane runtime has to be rebuilt for the device
     allowed = {"scenario", "lanes", "link_mbit", "cpus", "threads", "watch_interval",
-               "auto_watch", "cold_build", "mode"}
+               "auto_watch", "cold_build", "mode", "device"}
     for k, v in body.items():
         if k in allowed:
             s.settings[k] = v

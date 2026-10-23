@@ -37,7 +37,7 @@ ARG RUNC_VERSION=1.3.4
 ARG NERDCTL_VERSION=2.2.1
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      ca-certificates curl fuse3 iptables iproute2 jq python3 tini \
+      ca-certificates curl fuse3 gnupg iptables iproute2 jq python3 tini \
       python3-aiohttp python3-numpy python3-opencv && \
     rm -rf /var/lib/apt/lists/*
 
@@ -50,6 +50,16 @@ RUN curl -fsSL "https://github.com/containerd/nerdctl/releases/download/v${NERDC
     curl -fsSL -o /usr/local/sbin/runc "https://github.com/opencontainers/runc/releases/download/v${RUNC_VERSION}/runc.${TARGETARCH}" && \
     chmod 755 /usr/local/sbin/runc
 
+# nvidia-container-cli gives lane containers a passed-in GPU (ctr run --gpus);
+# unused without one.
+RUN curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+      | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit.gpg && \
+    curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+      | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit.gpg] https://#' \
+      > /etc/apt/sources.list.d/nvidia-container-toolkit.list && \
+    apt-get update && apt-get install -y --no-install-recommends nvidia-container-toolkit && \
+    rm -rf /var/lib/apt/lists/*
+
 COPY --from=build-snapshotter /out/ /usr/local/bin/
 COPY --from=build-tdfs /out/ /usr/local/bin/
 COPY etc/ /etc/
@@ -58,6 +68,7 @@ COPY entrypoint.sh /usr/local/bin/node-entrypoint
 COPY --from=demo controller/ /opt/demo/controller/
 COPY --from=demo lane/ /opt/demo/lane/
 COPY --from=demo scenarios/ /opt/demo/scenarios/
+COPY --from=demo models/ /opt/demo/models/
 COPY --from=demo dashboard/ /opt/demo/dashboard/
 
 VOLUME ["/var/lib/containerd", "/var/lib/containerd-stargz-grpc", "/var/lib/buildkit", "/var/lib/demo"]

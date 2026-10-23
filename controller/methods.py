@@ -47,12 +47,31 @@ def lane_hash():
 
 
 # Pinned by prepare, so editing the lane source mid-run can't change which base
-# later builds use.
+# later builds use. Includes the device (cpu or gpu) the runtime was built for.
 BASE_TAG = None
 
 
+def gpu_available():
+    """A GPU passed into the node (compose.gpu.yaml) that ctr run --gpus can
+    hand to lane containers through nvidia-container-cli."""
+    return os.path.exists("/dev/nvidia0") and shutil.which("nvidia-container-cli") is not None
+
+
+def device(setting):
+    """Effective device for a setting of auto, gpu or cpu."""
+    if setting == "cpu":
+        return "cpu"
+    if setting == "gpu" and not gpu_available():
+        raise RuntimeError("device is set to gpu, but the node has no GPU (see compose.gpu.yaml)")
+    return "gpu" if gpu_available() else "cpu"
+
+
+def base_tag(dev):
+    return f"{dev}-{lane_hash()}"
+
+
 def base_ref(variant):
-    return f"{REGISTRY}/base/lane-runtime:{variant}-{BASE_TAG or lane_hash()}"
+    return f"{REGISTRY}/base/lane-runtime:{variant}-{BASE_TAG or base_tag('cpu')}"
 
 
 class Method:
@@ -155,7 +174,10 @@ class Method:
         env = {"LANE": self.key, "PORT": str(self.port), "CONTROLLER": CONTROLLER,
                "THREADS": str(self.settings.get("threads", 2)),
                "ENABLED": ",".join(self.enabled)}
+        env["DEVICE"] = self.settings.get("effective_device", "cpu")
         args = ["run", "-d", "--net-host"]
+        if env["DEVICE"] == "gpu":
+            args += ["--gpus", "0"]
         if self.lazy:
             args.append("--snapshotter=stargz")
         if cpus:
@@ -393,12 +415,13 @@ def base_ready():
     return True
 
 
-async def prepare_base(lane_dir, emit):
+async def prepare_base(lane_dir, emit, dev):
     """Build the lane runtime once and publish it in the three base formats."""
     plain, esgz, zstd = base_ref("plain"), base_ref("esgz"), base_ref("zstd")
-    emit("prepare", step="runtime image")
+    emit("prepare", step=f"runtime image ({dev})")
     await sh("buildctl", "build", "--frontend", "dockerfile.v0",
              "--local", f"context={lane_dir}", "--local", f"dockerfile={lane_dir}",
+             "--opt", f"build-arg:DEVICE={dev}",
              # The registry expands 2DFS fields only on OCI manifests.
              "--output", f"type=image,name={plain},push=true,registry.insecure=true,"
                          "oci-mediatypes=true")

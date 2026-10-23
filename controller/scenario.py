@@ -21,6 +21,7 @@ ROOT = os.environ.get("DEMO_DATA", "/var/lib/demo")
 ASSETS = os.path.join(ROOT, "assets")
 WORK = os.path.join(ROOT, "work")
 SCENARIOS = os.environ.get("DEMO_SCENARIOS", "/opt/demo/scenarios")
+EXPORT_DIR = os.environ.get("DEMO_EXPORT", "/opt/demo/models/export")
 
 
 def load(name):
@@ -36,8 +37,10 @@ def available():
 def asset_path(name, spec):
     """Assets are shared by scenarios, so the file name includes the URL: two
     scenarios may use the same key for different files."""
-    source = spec.get("extract") or spec["url"].split("?")[0]
-    tag = hashlib.sha256(spec["url"].encode()).hexdigest()[:8]
+    origin = spec.get("url") or f"export:{spec['export']}"
+    source = spec.get("extract") or (spec["export"] + ".onnx" if "export" in spec
+                                     else spec["url"].split("?")[0])
+    tag = hashlib.sha256(origin.encode()).hexdigest()[:8]
     return os.path.join(ASSETS, f"{name}-{tag}{os.path.splitext(source)[1]}")
 
 
@@ -75,6 +78,21 @@ def _extract(archive, member, dest):
     os.replace(dest + ".part", dest)
 
 
+async def export_model(model, dest):
+    """Export a torchvision model to ONNX with models/export (BuildKit caches it)."""
+    out = dest + ".out"
+    proc = await asyncio.create_subprocess_exec(
+        "buildctl", "build", "--frontend", "dockerfile.v0",
+        "--local", f"context={EXPORT_DIR}", "--local", f"dockerfile={EXPORT_DIR}",
+        "--opt", f"build-arg:MODEL={model}", "--output", f"type=local,dest={out}",
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+    log, _ = await proc.communicate()
+    if proc.returncode:
+        raise RuntimeError(f"export {model} failed:\n{log.decode()[-2000:]}")
+    os.replace(os.path.join(out, model + ".onnx"), dest)
+    shutil.rmtree(out, ignore_errors=True)
+
+
 async def fetch_assets(scn, emit):
     os.makedirs(ASSETS, exist_ok=True)
     for name, spec in scn["assets"].items():
@@ -91,7 +109,10 @@ async def fetch_assets(scn, emit):
                 loop.call_soon_threadsafe(lambda: emit(
                     "prepare", step="download", asset=name, done=done, total=total))
 
-        if spec.get("extract"):
+        if spec.get("export"):
+            emit("prepare", step="export", asset=name)
+            await export_model(spec["export"], dest)
+        elif spec.get("extract"):
             archive = dest + ".download"
             await asyncio.to_thread(_download, spec["url"], archive, progress)
             await asyncio.to_thread(_extract, archive, spec["extract"], dest)

@@ -11,7 +11,7 @@ cost.
 Above: Act 5 at real speed. Docker, eStargz and 2DFS stop their containers to roll out v2;
 MitraFSnap refreshes the running container and keeps serving.
 
-▶ **[Full end-to-end run (MP4, 2 min 20 s)](docs/demo.mp4)**: Acts 1 to 6 with all four
+▶ **[Full end-to-end run (MP4, 1080p, 2 min 8 s)](docs/demo.mp4)**: Acts 1 to 6 with all four
 methods, played at 2× speed. The metrics in the video are real time.
 
 ## What the demo shows
@@ -31,7 +31,7 @@ The acts, for the traffic scenario:
 |---|---|---|
 | 1 Build v1 | each method builds and pushes the image | independent allotments build in parallel (2DFS, MitraFSnap) |
 | 2 Deploy | the camera needs only the detector | Docker pulls 1.1 GB before the first frame; lazy methods start from about 100 MB |
-| 3 Enable segmenter | a model the camera did not fetch | lazy methods fetch it on first use; 2DFS has to redeploy; Docker already paid for it in act 2 |
+| 3 Enable segmenter | Mask R-CNN instance masks, a model the camera did not fetch | lazy methods fetch it on first use; 2DFS has to redeploy; Docker already paid for it in act 2 |
 | 4 Build v2 | a stronger detector with new classes | only the changed allotments are rebuilt |
 | 5 Roll out v2 | replace vs refresh in place | replacement lanes go blind; MitraFSnap keeps serving and switches to v2 |
 | 6 Patch unused model | v3 changes a 528 MB model the camera never loads | Docker rebuilds and re-pulls it; MitraFSnap refreshes in milliseconds and fetches nothing |
@@ -44,11 +44,11 @@ link), as reported by `tools/summary.py`:
 
 | | Docker | eStargz | 2DFS | MitraFSnap |
 |---|---|---|---|---|
-| Build + push v1 | 19.4 s | 24.3 s | 10.3 s | 7.9 s |
-| First frame after deploy | 68.9 s | 15.2 s | 49.9 s | 12.3 s |
-| Blind during v2 rollout | 7.3 s | 5.6 s | 9.7 s | **0 s** |
-| Blind during v3 patch | 60.6 s | 30.9 s | 2.1 s | **0 s** |
-| Downloaded over the run | 1.64 GB | 1.05 GB | 394 MB | **359 MB** |
+| Build + push v1 | 18.4 s | 24.0 s | 8.8 s | 5.9 s |
+| First frame after deploy | 64.8 s | 11.4 s | 53.5 s | 14.1 s |
+| Blind during v2 rollout | 7.5 s | 5.8 s | 8.7 s | **0 s** |
+| Blind during v3 patch | 58.6 s | 29.4 s | 2.4 s | **0 s** |
+| Downloaded over the run | 1.61 GB | 991 MB | 363 MB | **326 MB** |
 
 These are live-mode numbers: the four methods share one machine's CPU and link, so treat them
 as a demonstration, not a benchmark. The paper's evaluation measures each method alone.
@@ -69,8 +69,9 @@ The first build compiles the MitraFSnap snapshotter, the 2DFS builder and the re
 the `mitrafsnap` repositories and takes a few minutes. Then open
 **http://localhost:8080** and click through the acts from left to right:
 
-1. **Setup: Prepare** downloads the models and the clip (about 1.7 GB, once) and builds the lane
-   runtime in its three base formats. The first time takes several minutes; later it takes seconds.
+1. **Setup: Prepare** downloads the models and the clip (about 1.5 GB, once), exports the
+   segmentation model to ONNX, and builds the lane runtime in its three base formats. The first
+   time takes several minutes; later it takes seconds.
 2. **Act 1 to Act 6**, in order. Each act ends when every lane shows its result.
 3. **Reset** clears all lanes, images and caches so the next run starts cold. Assets and base
    images are kept.
@@ -87,6 +88,25 @@ lanes; lower values make the differences easier to see.
 
 Everything runs in containers. On macOS they run inside Docker Desktop's own VM, so no extra VM
 is needed.
+
+### GPU
+
+On a machine with an NVIDIA GPU and the
+[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/)
+(a DGX Spark, an x86 workstation), pass the GPU into the backend:
+
+```sh
+docker compose -f compose.yaml -f compose.gpu.yaml up -d --build
+```
+
+The **Device** setting in the dashboard is `auto` by default: the lanes run their models on the
+GPU when the backend has one, and on the CPU otherwise. Choose `CPU` or `GPU` to force one, then
+run **Prepare** again, because the lane runtime is built per device. The status pill at the top
+right shows which one is in use. GPU mode installs CUDA-enabled ONNX Runtime with its CUDA and
+cuDNN libraries, so its runtime image is several GB larger; that changes the absolute pull
+numbers. The GPU runtime uses ONNX Runtime 1.31, built for CUDA 13, so the host needs an NVIDIA driver
+with CUDA 13 support (the DGX Spark's does). Docker Desktop on macOS has no GPU for containers,
+so a Mac always uses the CPU. GPU mode has not been tested on NVIDIA hardware yet.
 
 ### Run the backend on another machine
 
@@ -114,8 +134,9 @@ tools/summary.py run.json                               # per-lane numbers
 ```
 
 Set `DEMO_BACKEND` and `DEMO_TOKEN` to drive a remote backend. `tools/demo.py set
-'scenario="people"'` switches scenarios. `tools/record.py` records the dashboard while a
-headless browser clicks through the acts; it made the video above. `tools/webcam_check.py`
+'scenario="people"'` switches scenarios. `tools/record.py` captures the dashboard in a
+headless browser while the acts run, and `tools/encode.sh` turns the frames into the video and
+GIF above. `tools/webcam_check.py`
 checks the webcam path with Chromium's fake camera.
 
 ### Build from local clones
@@ -174,8 +195,7 @@ docker compose
 - **Docker Desktop (macOS).** Its LinuxKit kernel fails every exec through overlayfs on a FUSE
   layer that supports xattrs. The node detects this kernel and enables the snapshotter's
   `[fuse] disable_xattrs` option, which only exists in the MitraFSnap fork.
-- **DGX Spark.** ONNX Runtime uses CUDA when the CUDA execution provider is available, otherwise
-  the CPU.
+- **DGX Spark.** Start with `compose.gpu.yaml` (see [GPU](#gpu)).
 - **Raspberry Pi 5.** Works; expect a few frames per second per lane with four lanes.
 
 ## Troubleshooting
@@ -194,7 +214,8 @@ controller/       API, acts, methods, emulated link, frame source
 lane/             lane app and its runtime image
 dashboard/        static dashboard (HTML, CSS, JS, no build step)
 scenarios/        scenario definitions: models, versions, licenses
-tools/            CLI, trace summary, screenshots and recording
+models/export/    exports torchvision models to ONNX during Prepare
+tools/            CLI, trace summary, screenshots, recording and encoding
 DESIGN.md         design notes
 ```
 
@@ -206,7 +227,10 @@ Clips, from Wikimedia Commons:
 [AFN InFocus- DDG117 holds Sevillanas dance Classes](https://commons.wikimedia.org/wiki/File:AFN_InFocus-_DDG117_holds_Sevillanas_dance_Classes_(960160).webm)
 (public domain, U.S. Department of Defense).
 
-Models: YOLOX (Megvii, Apache-2.0); YuNet (OpenCV Zoo, MIT); RTMPose-m (OpenMMLab, Apache-2.0);
-FER+, FCN ResNet-101, ResNet-152 v2, VGG-16 and VGG-16-BN from the ONNX Model Zoo (FER+ MIT,
-the others Apache-2.0; FCN weights from torchvision, BSD-3-Clause). The dashboard lists the
-assets of the selected scenario.
+Models: YOLOX (Megvii, Apache-2.0); Mask R-CNN ResNet-50 FPN v2 (torchvision, BSD-3-Clause;
+exported to ONNX during **Prepare** by `models/export`); YuNet (OpenCV Zoo, MIT); RTMPose-m
+(OpenMMLab, Apache-2.0); FER+, ResNet-152 v2, VGG-16 and VGG-16-BN from the ONNX Model Zoo (FER+
+MIT, the others Apache-2.0). The dashboard lists the assets of the selected scenario.
+
+Font: [CMU Sans Serif](https://ctan.org/pkg/cm-unicode) (SIL Open Font License,
+`dashboard/fonts/OFL.txt`). Method colors follow the paper's figures.

@@ -21,7 +21,7 @@
   </header>
 
   <section class="controls">
-    <div class="group">
+    <div class="group scenario">
       <span class="label">Scenario</span>
       <select id="scenario"></select>
       <span id="scenario-desc" class="desc"></span>
@@ -42,6 +42,12 @@
         <option value="1000">1 Gbit/s</option>
         <option value="0">unlimited</option>
       </select>
+      <span class="label">Device</span>
+      <select id="device" title="auto uses the GPU when the backend has one">
+        <option value="auto">auto</option>
+        <option value="gpu">GPU</option>
+        <option value="cpu">CPU</option>
+      </select>
       <span class="pill mode" title="All shown methods run at the same time on one machine and share its CPU and link.">live mode</span>
     </div>
   </section>
@@ -50,7 +56,7 @@
   <p class="narration" id="narration" aria-live="polite"></p>
 
   <section class="workflow">
-    <svg id="diagram" viewBox="0 0 1300 250" preserveAspectRatio="xMidYMid meet" role="img"
+    <svg id="diagram" viewBox="0 0 1300 262" preserveAspectRatio="xMidYMid meet" role="img"
          aria-label="Workflow from build to serving, with replace and refresh update paths"></svg>
   </section>
 

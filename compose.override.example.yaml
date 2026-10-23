@@ -14,3 +14,4 @@ services:
       - ./dashboard:/opt/demo/dashboard
       - ./scenarios:/opt/demo/scenarios
       - ./lane:/opt/demo/lane
+      - ./models:/opt/demo/models

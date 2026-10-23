@@ -1,6 +1,7 @@
 """Model wrappers used by the lane app. Each wrapper loads one ONNX file and
 turns a BGR frame into drawable results."""
 
+import os
 import time
 
 import cv2
@@ -21,6 +22,21 @@ COCO = [
     "toothbrush",
 ]
 
+# torchvision's COCO category list (91 ids, with gaps)
+TV_COCO = [
+    "__background__", "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train",
+    "truck", "boat", "traffic light", "fire hydrant", "N/A", "stop sign", "parking meter",
+    "bench", "bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra",
+    "giraffe", "N/A", "backpack", "umbrella", "N/A", "N/A", "handbag", "tie", "suitcase",
+    "frisbee", "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove",
+    "skateboard", "surfboard", "tennis racket", "bottle", "N/A", "wine glass", "cup", "fork",
+    "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange", "broccoli", "carrot",
+    "hot dog", "pizza", "donut", "cake", "chair", "couch", "potted plant", "bed", "N/A",
+    "dining table", "N/A", "N/A", "toilet", "N/A", "tv", "laptop", "mouse", "remote",
+    "keyboard", "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", "N/A",
+    "book", "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush",
+]
+
 VOC = [
     "background", "aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat",
     "chair", "cow", "diningtable", "dog", "horse", "motorbike", "person", "pottedplant",
@@ -32,8 +48,11 @@ def session(path, threads):
     opts = ort.SessionOptions()
     opts.intra_op_num_threads = threads
     opts.inter_op_num_threads = 1
-    providers = [p for p in ("CUDAExecutionProvider", "CPUExecutionProvider")
-                 if p in ort.get_available_providers()]
+    opts.log_severity_level = 3   # exported detection graphs warn about dynamic shapes
+    wanted = ["CPUExecutionProvider"]
+    if os.environ.get("DEVICE") == "gpu":
+        wanted.insert(0, "CUDAExecutionProvider")
+    providers = [p for p in wanted if p in ort.get_available_providers()]
     return ort.InferenceSession(path, opts, providers=providers)
 
 
@@ -105,6 +124,65 @@ class VocSegmenter:
         blob = ((img / 255.0 - self.MEAN) / self.STD).transpose(2, 0, 1)[None].astype(np.float32)
         labels = self.sess.run(None, {self.input: blob})[0][0].argmax(0).astype(np.uint8)
         return cv2.resize(labels, (w, h), interpolation=cv2.INTER_NEAREST)
+
+
+class InstanceSegmenter:
+    """Mask R-CNN v2 (torchvision, exported to ONNX for a 960x540 frame).
+    Returns one mask per object, cropped to its box, so the lane can draw it
+    into the matching box of a newer frame."""
+
+    def __init__(self, path, spec, threads):
+        self.sess = session(path, threads)
+        self.score = float(spec.get("score", 0.6))
+        self.classes = set(spec["classes"])
+        self.input = self.sess.get_inputs()[0].name
+        self.size = (960, 540)
+
+    def __call__(self, frame):
+        h, w = frame.shape[:2]
+        img = cv2.resize(frame, self.size) if (w, h) != self.size else frame
+        blob = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).transpose(2, 0, 1).astype(np.float32) / 255
+        boxes, labels, scores, masks = self.sess.run(None, {self.input: blob})
+        sx, sy = w / self.size[0], h / self.size[1]
+        out = []
+        for box, label, score, mask in zip(boxes, labels, scores, masks):
+            name = TV_COCO[int(label)]
+            if score < self.score or name not in self.classes:
+                continue
+            x1, y1, x2, y2 = box
+            xi1, yi1, xi2, yi2 = int(x1), int(y1), int(np.ceil(x2)), int(np.ceil(y2))
+            crop = mask[0, yi1:yi2, xi1:xi2] > 0.5
+            if crop.size == 0:
+                continue
+            out.append({"name": name, "box": np.array([x1 * sx, y1 * sy, (x2 - x1) * sx,
+                                                       (y2 - y1) * sy]),
+                        "mask": crop.astype(np.uint8)})
+        return out
+
+
+def iou(a, b):
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    ix = max(0.0, min(ax + aw, bx + bw) - max(ax, bx))
+    iy = max(0.0, min(ay + ah, by + bh) - max(ay, by))
+    inter = ix * iy
+    return inter / (aw * ah + bw * bh - inter + 1e-6)
+
+
+def place_instances(dets, instances):
+    """Pair each current detection with the best-overlapping instance from the
+    last segmentation and place that mask in the current box. Unmatched
+    instances are dropped: their position is out of date."""
+    placed = []
+    for d in dets:
+        best, score = None, 0.3
+        for inst in instances:
+            s = iou(d["box"], inst["box"]) + (0.1 if inst["name"] == d["name"] else 0)
+            if s > score:
+                best, score = inst, s
+        if best is not None:
+            placed.append((d["box"], best["mask"], best["name"]))
+    return placed
 
 
 class Classifier:
@@ -217,7 +295,8 @@ class Pose:
 
 
 KINDS = {"yolox": YoloxDetector, "voc-seg": VocSegmenter, "imagenet-cls": Classifier,
-         "yunet": FaceDetector, "ferplus": Expression, "rtmpose": Pose}
+         "yunet": FaceDetector, "ferplus": Expression, "rtmpose": Pose,
+         "maskrcnn": InstanceSegmenter}
 
 # COCO keypoint pairs drawn as a skeleton
 SKELETON = [(5, 7), (7, 9), (6, 8), (8, 10), (5, 6), (5, 11), (6, 12), (11, 12),
@@ -241,6 +320,20 @@ def draw(frame, detections, overlays, label):
     """detections: dicts with name, conf, box and optional points and tag.
     overlays: {"mask": (labels, classes)} and/or {"pose": [(points, scores)]}."""
     out = frame.copy()
+    for (x, y, w, h), mask, name in overlays.get("instances", []):
+        x0, y0 = max(0, int(x)), max(0, int(y))
+        x1, y1 = min(out.shape[1], int(x + w)), min(out.shape[0], int(y + h))
+        if x1 <= x0 or y1 <= y0:
+            continue
+        m = cv2.resize(mask, (int(x + w) - int(x), int(y + h) - int(y)),
+                       interpolation=cv2.INTER_LINEAR)[y0 - int(y):y1 - int(y), x0 - int(x):x1 - int(x)]
+        region = out[y0:y1, x0:x1]
+        sel = m > 0
+        tint = np.empty_like(region)
+        tint[:] = color(name)
+        region[sel] = cv2.addWeighted(region, 0.45, tint, 0.55, 0)[sel]
+        contours, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(region, contours, -1, color(name), 2, cv2.LINE_AA)
     if "mask" in overlays:
         mask, classes = overlays["mask"]
         layer = np.zeros_like(out)

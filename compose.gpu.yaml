@@ -1,0 +1,15 @@
+# Pass the host's NVIDIA GPUs into the node, for hosts with the NVIDIA
+# Container Toolkit (e.g. a DGX Spark or an x86 workstation):
+#
+#   docker compose -f compose.yaml -f compose.gpu.yaml up -d --build
+#
+# The dashboard's Device setting (auto by default) then runs the lanes on the GPU.
+services:
+  node:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, utility, compute]

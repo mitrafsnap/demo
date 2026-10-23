@@ -42,11 +42,6 @@
       "license": "Apache-2.0",
       "credit": "YOLOX, Megvii"
     },
-    "fcn_resnet101": {
-      "url": "https://github.com/onnx/models/raw/main/validated/vision/object_detection_segmentation/fcn/model/fcn-resnet101-11.onnx",
-      "license": "BSD-3-Clause (torchvision weights), ONNX Model Zoo",
-      "credit": "FCN ResNet-101"
-    },
     "resnet152": {
       "url": "https://github.com/onnx/models/raw/main/validated/vision/classification/resnet/model/resnet152-v2-7.onnx",
       "license": "Apache-2.0, ONNX Model Zoo",
@@ -61,6 +56,11 @@
       "url": "https://github.com/onnx/models/raw/main/validated/vision/classification/vgg/model/vgg16-bn-7.onnx",
       "license": "Apache-2.0, ONNX Model Zoo",
       "credit": "VGG-16-BN"
+    },
+    "maskrcnn_v2": {
+      "export": "maskrcnn_v2",
+      "license": "BSD-3-Clause (torchvision); COCO-trained weights",
+      "credit": "Mask R-CNN ResNet-50 FPN v2, torchvision"
     }
   },
   "versions": {
@@ -78,19 +78,19 @@
         "label": "YOLOX-Tiny: people, cars"
       },
       "segmenter": {
-        "asset": "fcn_resnet101",
+        "asset": "maskrcnn_v2",
         "file": "segmenter.onnx",
-        "kind": "voc-seg",
-        "width": 384,
+        "kind": "maskrcnn",
         "classes": [
           "person",
-          "car",
-          "bus",
           "bicycle",
-          "motorbike",
+          "car",
+          "motorcycle",
+          "bus",
+          "truck",
           "train"
         ],
-        "label": "FCN ResNet-101 segmentation"
+        "label": "Mask R-CNN v2 instance segmentation"
       },
       "classifier": {
         "asset": "resnet152",

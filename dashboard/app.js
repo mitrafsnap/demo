@@ -17,7 +17,7 @@ const NARRATION = {
   reset: "Clearing every lane, image and cache, so the next run starts cold.",
   "build-v1": "Every method builds and pushes the same image. 2DFS and MitraFSnap build one allotment per model in parallel; BuildKit builds the layers one after another.",
   deploy: "The camera needs only the detector. Docker and 2DFS download before they start; eStargz and MitraFSnap start lazily and fetch only what the app reads.",
-  enable: "Turning on the segmenter, a 217 MB model the camera did not fetch. Lazy methods fetch it on first use; 2DFS has to redeploy with a wider selection.",
+  enable: "Turning on the segmenter, a 186 MB instance segmentation model the camera did not fetch. Lazy methods fetch it on first use; 2DFS has to redeploy with a wider selection.",
   "build-v2": "v2 ships a stronger detector that also recognizes bicycles, buses, trucks and streetcars. Only the changed parts are rebuilt.",
   update: "Rolling out v2. Docker, eStargz and 2DFS stop, pull and restart. MitraFSnap refreshes the running container's files in place and the app swaps models while it keeps serving.",
   patch: "v3 patches a 528 MB model this camera never loads. Replacement restarts the camera anyway; MitraFSnap refreshes in milliseconds and fetches nothing.",
@@ -128,7 +128,7 @@ async function connect() {
   } catch (e) { /* older backend without a trace: start empty */ }
   openVideo();
   state.es = new EventSource(url("/api/events"));
-  state.es.onopen = () => setStatus(`${state.info.backend.arch} · ${state.info.backend.cpus} CPUs`, "ok");
+  state.es.onopen = () => setStatus(statusText(), "ok");
   state.es.onerror = () => setStatus("reconnecting", "bad");
   state.es.onmessage = (m) => onEvent(JSON.parse(m.data));
 }
@@ -193,6 +193,12 @@ function openVideo() {
   state.ws = ws;
 }
 
+function statusText() {
+  const { backend, settings } = state.info;
+  const dev = settings.effective_device || (settings.device === "cpu" || !backend.gpu ? "cpu" : "gpu");
+  return `${backend.arch} · ${backend.cpus} CPUs · ${dev === "gpu" ? "GPU" : "CPU"} inference`;
+}
+
 function setStatus(text, cls) {
   const el = $("#status");
   el.textContent = text;
@@ -207,10 +213,12 @@ function renderControls() {
     `<option ${s === info.settings.scenario ? "selected" : ""}>${s}</option>`).join("");
   $("#scenario-desc").textContent = info.scenario.description;
   $("#link").value = String(info.settings.link_mbit || 0);
+  $("#device").value = info.settings.device || "auto";
+  $("#device option[value=gpu]").disabled = !info.backend.gpu;
   $("#lane-toggles").innerHTML = info.methods.map((m) => `
-    <label style="border-color:var(${COLORS[m.key]})">
+    <label>
       <input type="checkbox" value="${m.key}" ${info.settings.lanes.includes(m.key) ? "checked" : ""}>
-      ${m.title}</label>`).join("");
+      <span class="dot" style="background:var(${COLORS[m.key]})"></span>${m.title}</label>`).join("");
   $("#lane-toggles").onchange = () => setLanes(
     [...document.querySelectorAll("#lane-toggles input:checked")].map((i) => i.value));
   $("#webcam").hidden = info.scenario.frames !== "camera";
@@ -272,6 +280,8 @@ async function runAct(act) {
 
 function renderLanes() {
   const shown = state.info.settings.lanes;
+  $("#lanes").classList.toggle("one", shown.length === 1);
+  $("#lanes").classList.toggle("few", shown.length <= 2);
   $("#lanes").innerHTML = shown.map((k) => {
     const m = state.info.methods.find((x) => x.key === k);
     return `<article class="lane" id="lane-${k}">
@@ -281,14 +291,18 @@ function renderLanes() {
         <span class="tags">${TAGS[k].map((t) => `<span class="pill">${t}</span>`).join("")}</span>
         <span class="phase" data-f="phase">idle</span>
       </header>
-      <div class="video"><img alt="${m.title} output">
-        <span class="nosignal" data-f="nosignal">no output</span>
-        <span class="badge" data-f="badge"></span></div>
-      <canvas class="timeline" data-f="timeline" width="760" height="34"></canvas>
+      <div class="body">
+      <div class="media">
+        <div class="video"><img alt="${m.title} output">
+          <span class="nosignal" data-f="nosignal">no output</span>
+          <span class="badge" data-f="badge"></span></div>
+        <canvas class="timeline" data-f="timeline" width="760" height="26"></canvas>
+      </div>
       <div class="metrics">
         ${metric("build", "Build + push")}${metric("down", "Downloaded")}${metric("first", "First frame after deploy")}
         ${metric("seg", `${cap(state.info.scenario.enable)} ready`)}${metric("v2", "v2 live after")}${metric("gap", "Blind during v2 rollout")}
         ${metric("pbuild", "v3 build + push")}${metric("pdown", "v3 rollout downloaded")}${metric("pgap", "Blind during v3 rollout")}
+      </div>
       </div>
     </article>`;
   }).join("");
@@ -328,14 +342,15 @@ function updateLane(k) {
     set("gap", gap === 0 ? "0 s" : secs(gap), gap === 0 ? "good" : "bad");
   } else {
     set("v2", L.updateAt != null ? "…" : "–");
-    set("gap", L.updateAt != null ? secs(blindTime(L)) : "–", L.updateAt != null ? "bad" : "");
+    const g = L.updateAt != null ? blindTime(L) : null;
+    set("gap", g == null ? "–" : secs(g), g ? "bad" : "");
   }
   set("pbuild", secs(b("v3")));
   if (L.patchAt != null) {
     const done = L.v3At != null;
     const pgap = blindTime(L, L.patchAt, done ? L.patchAt + L.v3At : null);
     set("pdown", mb((L.patchBytes ?? L.bytes) - L.patchBytes0));
-    set("pgap", done && pgap === 0 ? "0 s" : secs(pgap), done && pgap === 0 ? "good" : "bad");
+    set("pgap", done && pgap === 0 ? "0 s" : secs(pgap), done && pgap === 0 ? "good" : pgap ? "bad" : "");
   } else {
     set("pdown", "–");
     set("pgap", "–");
@@ -362,6 +377,8 @@ function blindTime(L, start = L.updateAt, end = L.v2At != null ? L.updateAt + L.
 function drawTimeline(k) {
   const c = laneEl(k, "[data-f=timeline]");
   if (!c) return;
+  const px = Math.round(c.clientWidth * devicePixelRatio);
+  if (px && c.width !== px) { c.width = px; c.height = Math.round(26 * devicePixelRatio); }
   const L = state.lanes[k];
   const w = c.width, h = c.height, span = 90, t1 = now(), t0 = t1 - span;
   const g = c.getContext("2d");
@@ -379,7 +396,7 @@ function drawTimeline(k) {
   g.fillStyle = cssVar(COLORS[k]);
   for (const t of L.frames) if (t >= t0) g.fillRect(x(t), 8, 1.5, h - 16);
   g.fillStyle = "rgba(230,232,238,.55)";
-  g.font = "10px system-ui";
+  g.font = `11px ${cssVar("--font")}`;
   for (const [act, a] of Object.entries(state.acts)) {
     if (a.t == null || a.t < t0) continue;
     g.fillRect(x(a.t), 0, 1, h);
@@ -394,20 +411,20 @@ function drawDiagram() {
   const shown = state.info?.settings.lanes ?? [];
   const edge = ([a, b]) => {
     const [x1, y1] = NODES[a], [x2, y2] = NODES[b];
-    const sx = x1 + 58, ex = x2 - 58;
+    const sx = x1 + 64, ex = x2 - 64;
     return `<path class="edge" d="M${sx},${y1} C${(sx + ex) / 2},${y1} ${(sx + ex) / 2},${y2} ${ex},${y2}"/>`;
   };
   const node = ([id, [x, y, label, hint]]) => `<g class="node" data-node="${id}">
-      <rect x="${x - 58}" y="${y - 22}" width="116" height="44" rx="8"/>
-      <text x="${x}" y="${y - 2}" text-anchor="middle">${label}</text>
-      <text class="hint" x="${x}" y="${y + 13}" text-anchor="middle">${hint}</text></g>`;
-  const row = ([y, a, b]) => `<text class="rowlabel" x="12" y="${b ? y - 3 : y + 4}">${a}</text>` +
-    (b ? `<text class="rowlabel" x="12" y="${y + 11}">${b}</text>` : "");
+      <rect x="${x - 64}" y="${y - 27}" width="128" height="54" rx="8"/>
+      <text x="${x}" y="${y - 1}" text-anchor="middle">${label}</text>
+      <text class="hint" x="${x}" y="${y + 17}" text-anchor="middle">${hint}</text></g>`;
+  const row = ([y, a, b]) => `<text class="rowlabel" x="8" y="${b ? y - 4 : y + 5}">${a}</text>` +
+    (b ? `<text class="rowlabel" x="8" y="${y + 14}">${b}</text>` : "");
   svg.innerHTML = `
     ${ROWS.map(row).join("")}
     ${EDGES.map(edge).join("")}${Object.entries(NODES).map(node).join("")}
     ${shown.map((k, i) => `<g class="marker" id="marker-${k}" style="opacity:0">
-      <circle r="9" fill="var(${COLORS[k]})"/><text text-anchor="middle" y="3.5">${LETTER[k]}</text>
+      <circle r="12" fill="var(${COLORS[k]})" stroke="#0f1115" stroke-width="1.5"/><text text-anchor="middle" y="3.5">${LETTER[k]}</text>
     </g>`).join("")}`;
   for (const k of shown) placeMarker(k);
 }
@@ -421,7 +438,7 @@ function placeMarker(k) {
   const i = shown.indexOf(k);
   const [x, y] = NODES[L.node];
   el.style.opacity = 1;
-  el.style.transform = `translate(${x - 44 + i * 22}px, ${y + 30}px)`;
+  el.style.transform = `translate(${x - 39 + i * 26}px, ${y + 36}px)`;
 }
 
 function setNode(k, node, phase) {
@@ -571,6 +588,12 @@ $("#webcam").onclick = toggleWebcam;
 $("#all-lanes").onclick = () => setLanes(state.info.methods.map((m) => m.key));
 $("#link").onchange = async (e) => {
   try { await api("/api/settings", { link_mbit: Number(e.target.value) }); } catch (err) { log(err.message); }
+};
+$("#device").onchange = async (e) => {
+  try {
+    await api("/api/settings", { device: e.target.value });
+    log(`device: ${e.target.value}; run Prepare again to rebuild the lane runtime`);
+  } catch (err) { log(err.message); e.target.value = state.info.settings.device; }
 };
 $("#scenario").onchange = async (e) => {
   try { await api("/api/settings", { scenario: e.target.value }); await connect(); } catch (err) { log(err.message); }
