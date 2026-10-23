@@ -1,0 +1,45 @@
+# MitraFSnap demo backend.
+#
+#   docker compose up -d --build
+#
+# Sources default to the public mitrafsnap repos. To build from local clones,
+# copy compose.override.example.yaml to compose.override.yaml.
+
+name: mitrafsnap-demo
+
+services:
+  registry:
+    build:
+      context: https://github.com/mitrafsnap/2dfs-registry.git#main
+    environment:
+      OTEL_TRACES_EXPORTER: none
+    volumes:
+      - registry-data:/var/lib/registry
+    ports:
+      - "127.0.0.1:5000:5000"
+
+  node:
+    build:
+      context: node
+      additional_contexts:
+        snapshotter: https://github.com/mitrafsnap/stargz-snapshotter.git#fuse-disable-xattrs
+        builder: https://github.com/mitrafsnap/2dfs-builder.git#main
+    privileged: true
+    cgroup: host
+    devices:
+      - /dev/fuse
+    depends_on:
+      - registry
+    volumes:
+      - containerd:/var/lib/containerd
+      - stargz:/var/lib/containerd-stargz-grpc
+      - buildkit:/var/lib/buildkit
+      - tdfs:/root/.2dfs
+      - ./node:/smoke:ro
+
+volumes:
+  registry-data:
+  containerd:
+  stargz:
+  buildkit:
+  tdfs:

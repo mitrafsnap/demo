@@ -1,0 +1,4 @@
+compose.override.yaml
+__pycache__/
+.venv/
+/work/

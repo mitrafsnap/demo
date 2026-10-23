@@ -1,0 +1,10 @@
+# Build from local clones next to this repo instead of GitHub.
+services:
+  registry:
+    build:
+      context: ../2dfs-registry
+  node:
+    build:
+      additional_contexts:
+        snapshotter: ../stargz-snapshotter
+        builder: ../2dfs-builder
