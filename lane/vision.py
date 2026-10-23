@@ -81,7 +81,8 @@ class YoloxDetector:
         xy, wh, cls, conf = xy[keep], wh[keep], cls[keep], conf[keep]
         boxes = np.concatenate([xy - wh / 2, wh], 1) / r
         idx = cv2.dnn.NMSBoxes(boxes.tolist(), conf.tolist(), self.score, 0.45)
-        return [(COCO[cls[i]], float(conf[i]), boxes[i]) for i in np.array(idx).flatten()]
+        return [{"name": COCO[cls[i]], "conf": float(conf[i]), "box": boxes[i]}
+                for i in np.array(idx).flatten()]
 
 
 class VocSegmenter:
@@ -120,7 +121,107 @@ class Classifier:
         return int(out.argmax())
 
 
-KINDS = {"yolox": YoloxDetector, "voc-seg": VocSegmenter, "imagenet-cls": Classifier}
+class FaceDetector:
+    """YuNet from the OpenCV model zoo, run through OpenCV's FaceDetectorYN."""
+
+    def __init__(self, path, spec, threads):
+        cv2.setNumThreads(threads)
+        self.score = float(spec.get("score", 0.7))
+        self.det = cv2.FaceDetectorYN.create(path, "", (320, 320), self.score, 0.3, 50)
+        self.size = None
+
+    def __call__(self, frame):
+        h, w = frame.shape[:2]
+        if self.size != (w, h):
+            self.det.setInputSize((w, h))
+            self.size = (w, h)
+        _, faces = self.det.detect(frame)
+        if faces is None:
+            return []
+        return [{"name": "face", "conf": float(f[14]), "box": f[:4],
+                 "points": f[4:14].reshape(5, 2)} for f in faces]
+
+
+class Expression:
+    """FER+ from the ONNX model zoo: one 64x64 grayscale face in, 8 emotions out.
+    Runs on the faces the detector found."""
+
+    LABELS = ["neutral", "happy", "surprised", "sad", "angry", "disgusted", "afraid",
+              "contempt"]
+
+    def __init__(self, path, spec, threads):
+        self.sess = session(path, threads)
+        self.input = self.sess.get_inputs()[0].name
+
+    def __call__(self, payload):
+        frame, boxes = payload
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        out = []
+        for x, y, w, h in boxes:
+            x0, y0 = max(0, int(x)), max(0, int(y))
+            crop = gray[y0:int(y + h), x0:int(x + w)]
+            if crop.size == 0:
+                out.append(None)
+                continue
+            blob = cv2.resize(crop, (64, 64)).astype(np.float32)[None, None]
+            logits = self.sess.run(None, {self.input: blob})[0][0]
+            p = np.exp(logits - logits.max())
+            p /= p.sum()
+            out.append((self.LABELS[int(p.argmax())], float(p.max())))
+        return out
+
+
+class Pose:
+    """RTMPose-m (SimCC) top-down body keypoints. A webcam shows people from the
+    waist up, so each person box is derived from a face box."""
+
+    MEAN = np.array([123.675, 116.28, 103.53], np.float32)
+    STD = np.array([58.395, 57.12, 57.375], np.float32)
+    W, H = 192, 256
+
+    def __init__(self, path, spec, threads):
+        self.sess = session(path, threads)
+        self.input = self.sess.get_inputs()[0].name
+
+    def person_box(self, face, shape):
+        x, y, w, h = face
+        cx, top = x + w / 2, y - 0.6 * h
+        bw = 4.0 * w
+        bh = min(shape[0] - top, 6.5 * h)
+        return cx, top + bh / 2, bw, bh
+
+    def __call__(self, payload):
+        frame, faces = payload
+        boxes = [self.person_box(f, frame.shape) for f in faces] or [
+            (frame.shape[1] / 2, frame.shape[0] / 2, frame.shape[1], frame.shape[0])]
+        people = []
+        for cx, cy, bw, bh in boxes[:3]:
+            # pad 1.25 and match the model's aspect ratio
+            bw, bh = bw * 1.25, bh * 1.25
+            if bw / bh > self.W / self.H:
+                bh = bw * self.H / self.W
+            else:
+                bw = bh * self.W / self.H
+            src = np.float32([[cx - bw / 2, cy - bh / 2], [cx + bw / 2, cy - bh / 2],
+                              [cx - bw / 2, cy + bh / 2]])
+            dst = np.float32([[0, 0], [self.W, 0], [0, self.H]])
+            crop = cv2.warpAffine(frame, cv2.getAffineTransform(src, dst), (self.W, self.H))
+            img = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB).astype(np.float32)
+            blob = ((img - self.MEAN) / self.STD).transpose(2, 0, 1)[None]
+            sx, sy = self.sess.run(None, {self.input: blob})
+            kx, ky = sx[0].argmax(1) / 2.0, sy[0].argmax(1) / 2.0
+            score = np.minimum(sx[0].max(1), sy[0].max(1))
+            pts = np.stack([cx - bw / 2 + kx * bw / self.W, cy - bh / 2 + ky * bh / self.H], 1)
+            people.append((pts, score))
+        return people
+
+
+KINDS = {"yolox": YoloxDetector, "voc-seg": VocSegmenter, "imagenet-cls": Classifier,
+         "yunet": FaceDetector, "ferplus": Expression, "rtmpose": Pose}
+
+# COCO keypoint pairs drawn as a skeleton
+SKELETON = [(5, 7), (7, 9), (6, 8), (8, 10), (5, 6), (5, 11), (6, 12), (11, 12),
+            (11, 13), (13, 15), (12, 14), (14, 16), (0, 1), (0, 2), (1, 3), (2, 4)]
 
 
 def load(path, spec, threads):
@@ -129,23 +230,41 @@ def load(path, spec, threads):
     return model, time.perf_counter() - t0
 
 
-def draw(frame, detections, mask, seg_classes, label):
+def _label(out, text, p, c):
+    (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+    cv2.rectangle(out, (p[0], p[1] - th - 6), (p[0] + tw + 4, p[1]), c, -1)
+    cv2.putText(out, text, (p[0] + 2, p[1] - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1,
+                cv2.LINE_AA)
+
+
+def draw(frame, detections, overlays, label):
+    """detections: dicts with name, conf, box and optional points and tag.
+    overlays: {"mask": (labels, classes)} and/or {"pose": [(points, scores)]}."""
     out = frame.copy()
-    if mask is not None:
-        overlay = np.zeros_like(out)
-        for c in seg_classes:
-            overlay[mask == VOC.index(c)] = color(c)
-        sel = overlay.any(2)
-        out[sel] = cv2.addWeighted(out, 0.45, overlay, 0.55, 0)[sel]
-    for name, conf, (x, y, w, h) in detections:
-        c = color(name)
+    if "mask" in overlays:
+        mask, classes = overlays["mask"]
+        layer = np.zeros_like(out)
+        for c in classes:
+            layer[mask == VOC.index(c)] = color(c)
+        sel = layer.any(2)
+        out[sel] = cv2.addWeighted(out, 0.45, layer, 0.55, 0)[sel]
+    for pts, score in overlays.get("pose", []):
+        c = color("pose")
+        for a, b in SKELETON:
+            if score[a] > 0.3 and score[b] > 0.3:
+                cv2.line(out, tuple(int(v) for v in pts[a]), tuple(int(v) for v in pts[b]), c, 3,
+                         cv2.LINE_AA)
+        for (x, y), sc in zip(pts, score):
+            if sc > 0.3:
+                cv2.circle(out, (int(x), int(y)), 4, (255, 255, 255), -1, cv2.LINE_AA)
+    for d in detections:
+        x, y, w, h = d["box"]
+        c = color(d["name"])
         p1, p2 = (int(x), int(y)), (int(x + w), int(y + h))
         cv2.rectangle(out, p1, p2, c, 2)
-        txt = f"{name} {conf:.2f}"
-        (tw, th), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
-        cv2.rectangle(out, (p1[0], p1[1] - th - 6), (p1[0] + tw + 4, p1[1]), c, -1)
-        cv2.putText(out, txt, (p1[0] + 2, p1[1] - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
-                    (0, 0, 0), 1, cv2.LINE_AA)
+        for px, py in d.get("points", []):
+            cv2.circle(out, (int(px), int(py)), 2, c, -1)
+        _label(out, d.get("tag") or f"{d['name']} {d['conf']:.2f}", p1, c)
     cv2.rectangle(out, (0, 0), (out.shape[1], 26), (0, 0, 0), -1)
     cv2.putText(out, label, (8, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1,
                 cv2.LINE_AA)

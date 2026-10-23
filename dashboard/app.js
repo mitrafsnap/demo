@@ -124,14 +124,52 @@ async function connect() {
   // Catch up on the current run, so a page opened mid-demo shows it all.
   try {
     const trace = await api("/api/trace");
-    for (const ev of trace.events) if (ev.kind !== "sample") onEvent(ev);
-    for (const ev of trace.events.slice(-1)) if (ev.kind === "sample") onEvent({ ...ev, kind: "stats" });
+    for (const ev of trace.events) onEvent(ev.kind === "sample" ? { ...ev, kind: "stats" } : ev);
   } catch (e) { /* older backend without a trace: start empty */ }
   openVideo();
   state.es = new EventSource(url("/api/events"));
   state.es.onopen = () => setStatus(`${state.info.backend.arch} · ${state.info.backend.cpus} CPUs`, "ok");
   state.es.onerror = () => setStatus("reconnecting", "bad");
   state.es.onmessage = (m) => onEvent(JSON.parse(m.data));
+}
+
+// Webcam: frames from this browser's camera replace the scenario's fallback clip
+// for every lane. Browsers only allow the camera on https or localhost.
+async function toggleWebcam() {
+  const btn = $("#webcam");
+  if (state.cam) {
+    clearInterval(state.cam.timer);
+    state.cam.stream.getTracks().forEach((t) => t.stop());
+    state.cam.ws.close();
+    state.cam = null;
+    btn.textContent = "Use my webcam";
+    return;
+  }
+  let stream;
+  try {
+    if (!navigator.mediaDevices) throw new Error("the browser only allows the camera on https or localhost");
+    stream = await navigator.mediaDevices.getUserMedia({ video: { width: 960, height: 540 } });
+  } catch (e) {
+    $("#narration").textContent = `Webcam unavailable: ${e.message}. Open the dashboard on ` +
+      "localhost (an SSH tunnel works for a remote backend) or over https.";
+    log(`webcam: ${e.message}`);
+    return;
+  }
+  const video = Object.assign(document.createElement("video"), { srcObject: stream, muted: true });
+  await video.play();
+  const canvas = document.createElement("canvas");
+  const u = new URL(url("/api/camera"), location.href);
+  u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(u.href);
+  const timer = setInterval(() => {
+    if (ws.readyState !== WebSocket.OPEN || ws.bufferedAmount > 1 << 20) return;
+    canvas.width = 960;
+    canvas.height = Math.round(960 * video.videoHeight / video.videoWidth) || 540;
+    canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((b) => b && ws.send(b), "image/jpeg", 0.8);
+  }, 100);
+  state.cam = { stream, ws, timer };
+  btn.textContent = "Stop webcam";
 }
 
 // Lane frames arrive over one WebSocket: [lane index byte][JPEG].
@@ -175,6 +213,7 @@ function renderControls() {
       ${m.title}</label>`).join("");
   $("#lane-toggles").onchange = () => setLanes(
     [...document.querySelectorAll("#lane-toggles input:checked")].map((i) => i.value));
+  $("#webcam").hidden = info.scenario.frames !== "camera";
   const credits = Object.values(info.scenario.credits)
     .map((c) => `${c.credit} (${c.license})`).join(" · ");
   $("#credits").textContent = `Assets: ${credits}`;
@@ -191,10 +230,18 @@ async function setLanes(lanes) {
   renderLanes();
 }
 
+// Act labels and narration, with the scenario's overrides.
+function actInfo(id) {
+  const base = ACTS.find((a) => a.id === id);
+  const o = state.info?.scenario.acts?.[id] || {};
+  return base && { ...base, title: o.title || base.title, what: o.what || base.what,
+    narration: o.narration || NARRATION[id] };
+}
+
 function renderActs() {
   const doneAll = (id) => state.acts[id]?.state === "end";
   const next = ACTS.find((a) => !doneAll(a.id));
-  const html = ACTS.map((a) => {
+  const html = ACTS.map(({ id }) => actInfo(id)).map((a) => {
     const st = state.acts[a.id]?.state;
     const cls = st === "start" ? "running" : st === "end" ? "done" : st === "error" ? "error" : "";
     return `<button class="act ${cls} ${next && next.id === a.id && !state.running ? "next" : ""}"
@@ -204,9 +251,10 @@ function renderActs() {
   }).join("") + `<button class="act reset" data-act="reset" ${state.running ? "disabled" : ""}>Reset</button>`;
   $("#acts").innerHTML = html;
   const shown = state.lastAct;
-  const act = ACTS.find((a) => a.id === shown);
-  $("#narration").innerHTML = shown && NARRATION[shown]
-    ? `<strong>${act ? `${act.n} · ${act.title}` : "Reset"}</strong> ${NARRATION[shown]}` : "";
+  const act = actInfo(shown);
+  const text = act ? act.narration : NARRATION[shown];
+  $("#narration").innerHTML = text
+    ? `<strong>${act ? `${act.n} · ${act.title}` : "Reset"}</strong> ${text}` : "";
   for (const b of document.querySelectorAll("#acts button")) {
     b.onclick = () => runAct(b.dataset.act);
   }
@@ -239,13 +287,15 @@ function renderLanes() {
       <canvas class="timeline" data-f="timeline" width="760" height="34"></canvas>
       <div class="metrics">
         ${metric("build", "Build + push")}${metric("down", "Downloaded")}${metric("first", "First frame after deploy")}
-        ${metric("seg", "Segmenter ready")}${metric("v2", "v2 live after")}${metric("gap", "Blind during v2 rollout")}
+        ${metric("seg", `${cap(state.info.scenario.enable)} ready`)}${metric("v2", "v2 live after")}${metric("gap", "Blind during v2 rollout")}
         ${metric("pbuild", "v3 build + push")}${metric("pdown", "v3 rollout downloaded")}${metric("pgap", "Blind during v3 rollout")}
       </div>
     </article>`;
   }).join("");
   drawDiagram();
 }
+
+function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
 function metric(id, label) {
   return `<div class="metric"><div class="k">${label}</div><div class="v" data-m="${id}">–</div></div>`;
@@ -415,6 +465,7 @@ function onEvent(ev) {
       break;
     case "settings":
       state.info.settings = ev.settings;
+      if (ev.settings.scenario !== state.info.scenario.name) { connect(); return; }
       renderControls();
       renderLanes();
       break;
@@ -493,7 +544,7 @@ function onFrame(L, ev) {
   L.version = ev.version;
   L.models = ev.models || [];
   if (L.deployAt != null && L.firstFrame == null) L.firstFrame = ev.t - L.deployAt;
-  if (L.enableAt != null && L.segReady == null && L.models.includes("segmenter")) L.segReady = ev.t - L.enableAt;
+  if (L.enableAt != null && L.segReady == null && L.models.includes(state.info.scenario.enable)) L.segReady = ev.t - L.enableAt;
   if (L.updateAt != null && L.v2At == null && ev.version === "v2") L.v2At = ev.t - L.updateAt;
   if (!["build", "push"].includes(L.node) && L.node !== "serve") setNode(L.key, "serve", "serving");
   else if (L.node === "serve") L.phase = "serving";
@@ -516,6 +567,7 @@ function tick() {
 }
 
 $("#connect").onclick = connect;
+$("#webcam").onclick = toggleWebcam;
 $("#all-lanes").onclick = () => setLanes(state.info.methods.map((m) => m.key));
 $("#link").onchange = async (e) => {
   try { await api("/api/settings", { link_mbit: Number(e.target.value) }); } catch (err) { log(err.message); }

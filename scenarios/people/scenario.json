@@ -1,0 +1,141 @@
+{
+  "name": "people",
+  "title": "People camera (webcam)",
+  "description": "A camera that watches people. v1 finds faces; v2 ships an expression model that recognizes smiles. Act 3 turns on body pose. v3 patches a large model this camera never uses.",
+  "frames": {
+    "kind": "camera",
+    "fps": 10,
+    "width": 960,
+    "fallback": {
+      "asset": "clip",
+      "start": 4,
+      "end": 56
+    }
+  },
+  "slots": [
+    "face",
+    "expression",
+    "pose",
+    "classifier",
+    "aux",
+    "config"
+  ],
+  "docker_order": [
+    "aux",
+    "classifier",
+    "pose",
+    "face",
+    "expression",
+    "config"
+  ],
+  "select": [
+    "face",
+    "config"
+  ],
+  "enable": "pose",
+  "acts": {
+    "enable": {
+      "title": "Enable pose",
+      "what": "a model the camera didn't fetch",
+      "narration": "Turning on body pose, a model the camera did not fetch. Lazy methods fetch it on first use; 2DFS has to redeploy with a wider selection."
+    },
+    "build-v2": {
+      "title": "Build v2",
+      "what": "new expression model",
+      "narration": "v2 ships an expression model that recognizes smiles. Only the changed parts are rebuilt."
+    },
+    "update": {
+      "narration": "Rolling out v2. Docker, eStargz and 2DFS stop, pull and restart. MitraFSnap refreshes the running container's files in place, and smiles start being labeled while it keeps serving."
+    }
+  },
+  "assets": {
+    "clip": {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/7/7f/AFN_InFocus-_DDG117_holds_Sevillanas_dance_Classes_%28960160%29.webm",
+      "license": "Public domain (U.S. Department of Defense)",
+      "credit": "File:AFN InFocus- DDG117 holds Sevillanas dance Classes (960160).webm, Wikimedia Commons"
+    },
+    "yunet": {
+      "url": "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+      "license": "MIT",
+      "credit": "YuNet, OpenCV Zoo"
+    },
+    "ferplus": {
+      "url": "https://github.com/onnx/models/raw/main/validated/vision/body_analysis/emotion_ferplus/model/emotion-ferplus-8.onnx",
+      "license": "MIT, ONNX Model Zoo",
+      "credit": "FER+ emotion recognition"
+    },
+    "rtmpose": {
+      "url": "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/rtmpose-m_simcc-body7_pt-body7_420e-256x192-e48f03d0_20230504.zip",
+      "extract": "end2end.onnx",
+      "license": "Apache-2.0",
+      "credit": "RTMPose-m, OpenMMLab"
+    },
+    "resnet152": {
+      "url": "https://github.com/onnx/models/raw/main/validated/vision/classification/resnet/model/resnet152-v2-7.onnx",
+      "license": "Apache-2.0, ONNX Model Zoo",
+      "credit": "ResNet-152 v2"
+    },
+    "vgg16": {
+      "url": "https://github.com/onnx/models/raw/main/validated/vision/classification/vgg/model/vgg16-12.onnx",
+      "license": "Apache-2.0, ONNX Model Zoo",
+      "credit": "VGG-16"
+    },
+    "vgg16_bn": {
+      "url": "https://github.com/onnx/models/raw/main/validated/vision/classification/vgg/model/vgg16-bn-7.onnx",
+      "license": "Apache-2.0, ONNX Model Zoo",
+      "credit": "VGG-16-BN"
+    }
+  },
+  "versions": {
+    "v1": {
+      "face": {
+        "asset": "yunet",
+        "file": "face.onnx",
+        "kind": "yunet",
+        "enabled": true,
+        "label": "YuNet face detection"
+      },
+      "expression": {
+        "placeholder": true,
+        "file": "expression.onnx",
+        "kind": "ferplus",
+        "label": "expression: not shipped yet"
+      },
+      "pose": {
+        "asset": "rtmpose",
+        "file": "pose.onnx",
+        "kind": "rtmpose",
+        "label": "RTMPose-m body keypoints"
+      },
+      "classifier": {
+        "asset": "resnet152",
+        "file": "classifier.onnx",
+        "kind": "imagenet-cls",
+        "label": "ResNet-152 classifier (unused by this camera)"
+      },
+      "aux": {
+        "asset": "vgg16",
+        "file": "aux.onnx",
+        "kind": "imagenet-cls",
+        "label": "VGG-16 classifier (unused by this camera)"
+      }
+    },
+    "v2": {
+      "expression": {
+        "asset": "ferplus",
+        "file": "expression.onnx",
+        "kind": "ferplus",
+        "enabled": true,
+        "label": "FER+ expressions: happy, surprised, neutral, ..."
+      }
+    },
+    "v3": {
+      "aux": {
+        "asset": "vgg16_bn",
+        "file": "aux.onnx",
+        "kind": "imagenet-cls",
+        "label": "VGG-16-BN classifier, patched (unused by this camera)"
+      }
+    }
+  }
+}

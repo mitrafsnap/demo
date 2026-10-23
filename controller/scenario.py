@@ -15,6 +15,7 @@ import json
 import os
 import shutil
 import urllib.request
+import zipfile
 
 ROOT = os.environ.get("DEMO_DATA", "/var/lib/demo")
 ASSETS = os.path.join(ROOT, "assets")
@@ -33,7 +34,11 @@ def available():
 
 
 def asset_path(name, spec):
-    return os.path.join(ASSETS, name + os.path.splitext(spec["url"].split("?")[0])[1])
+    """Assets are shared by scenarios, so the file name includes the URL: two
+    scenarios may use the same key for different files."""
+    source = spec.get("extract") or spec["url"].split("?")[0]
+    tag = hashlib.sha256(spec["url"].encode()).hexdigest()[:8]
+    return os.path.join(ASSETS, f"{name}-{tag}{os.path.splitext(source)[1]}")
 
 
 def sha256(path):
@@ -61,6 +66,15 @@ def _download(url, dest, progress):
     os.replace(tmp, dest)
 
 
+def _extract(archive, member, dest):
+    """Copy the archive member whose name ends with member to dest."""
+    with zipfile.ZipFile(archive) as z:
+        name = next(n for n in z.namelist() if n.endswith("/" + member) or n == member)
+        with z.open(name) as src, open(dest + ".part", "wb") as out:
+            shutil.copyfileobj(src, out)
+    os.replace(dest + ".part", dest)
+
+
 async def fetch_assets(scn, emit):
     os.makedirs(ASSETS, exist_ok=True)
     for name, spec in scn["assets"].items():
@@ -77,7 +91,13 @@ async def fetch_assets(scn, emit):
                 loop.call_soon_threadsafe(lambda: emit(
                     "prepare", step="download", asset=name, done=done, total=total))
 
-        await asyncio.to_thread(_download, spec["url"], dest, progress)
+        if spec.get("extract"):
+            archive = dest + ".download"
+            await asyncio.to_thread(_download, spec["url"], archive, progress)
+            await asyncio.to_thread(_extract, archive, spec["extract"], dest)
+            os.remove(archive)
+        else:
+            await asyncio.to_thread(_download, spec["url"], dest, progress)
 
 
 def version_specs(scn, version):
@@ -101,9 +121,17 @@ def materialize(scn, version):
         if slot == "config":
             continue
         spec = version_specs(scn, version)[slot]
-        src = asset_path(spec["asset"], scn["assets"][spec["asset"]])
-        os.link(src, os.path.join(base, slot, spec["file"]))
-        models[slot] = {k: v for k, v in spec.items() if k != "asset"}
+        dest = os.path.join(base, slot, spec["file"])
+        if spec.get("placeholder"):
+            # A slot reserved for a model a later version ships, so the image
+            # keeps the same layout across versions.
+            with open(dest, "w") as f:
+                f.write(f"{slot}: not shipped in {version}\n")
+            src = dest
+        else:
+            src = asset_path(spec["asset"], scn["assets"][spec["asset"]])
+            os.link(src, dest)
+        models[slot] = {k: v for k, v in spec.items() if k not in ("asset", "placeholder")}
         models[slot]["sha256"] = sha256(src)
         models[slot]["bytes"] = os.path.getsize(src)
     config = {"scenario": scn["name"], "version": version, "models": models}

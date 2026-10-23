@@ -60,7 +60,7 @@ def main():
             "build v1 (s)": round(build("v1"), 1), "build v2 (s)": round(build("v2"), 1),
             "first frame (s)": ready.get("first frame"),
             "MB by first frame": round(bytes_at(acts["deploy"] + (ready.get("first frame") or 0) + 1) / 1e6),
-            "segmenter (s)": ready.get("segmenter output"),
+            "enabled model (s)": next((v for k, v in ready.items() if k.endswith(" output")), None),
             "v2 live (s)": v2, "blind (s)": blind and round(blind, 2),
             "longest gap (s)": longest and round(longest, 2),
             "v3 build (s)": round(build("v3"), 1), "v3 live (s)": v3,

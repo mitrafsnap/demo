@@ -16,8 +16,16 @@ methods, played at 2× speed. The metrics in the video are real time.
 
 ## What the demo shows
 
-The traffic scenario is a city camera at a busy crossing. Its image holds a small detector
-the camera uses, a large segmenter it turns on later, and two large models it never uses.
+There are two scenarios, picked in the dashboard's **Scenario** menu. Both run the same acts.
+
+- **traffic**: a city camera at a busy crossing (recorded clip). Its image holds a small
+  detector the camera uses, a large segmenter it turns on later, and two large models it never
+  uses. v2 ships a stronger detector that also recognizes bicycles, buses and trucks.
+- **people**: a camera that watches people, fed by **your webcam** (or a recorded clip until you
+  turn it on). v1 finds faces, Act 3 turns on body pose, and v2 ships an expression model that
+  labels smiles. The same two unused models are in the image.
+
+The acts, for the traffic scenario:
 
 | Act | What happens | What to watch |
 |---|---|---|
@@ -67,6 +75,12 @@ the `mitrafsnap` repositories and takes a few minutes. Then open
 3. **Reset** clears all lanes, images and caches so the next run starts cold. Assets and base
    images are kept.
 
+To use your webcam, pick the **people** scenario and click **Use my webcam**. The browser sends
+its camera frames to the backend, so the camera never has to be attached to the machine running
+the backend. Browsers only allow the camera on `https` or `localhost` pages: open the dashboard
+at `http://localhost:8080`, or through an SSH tunnel when the backend runs elsewhere. Without
+the webcam the scenario plays its recorded clip.
+
 Docker and MitraFSnap are shown by default. Tick eStargz and 2DFS, or click **Show all**, before
 Act 1 to compare all four. **Edge link** sets the shared bandwidth between the registry and the
 lanes; lower values make the differences easier to see.
@@ -87,7 +101,8 @@ DEMO_BIND=0.0.0.0 DEMO_TOKEN=choose-a-secret docker compose up -d --build
 
 Then open `http://<machine>:8080/?token=choose-a-secret`, or open any copy of the dashboard and
 enter the backend URL and token at the top. Without `DEMO_BIND` the backend only listens on
-localhost; an SSH tunnel (`ssh -L 8080:localhost:8080 <machine>`) works as well.
+localhost; an SSH tunnel (`ssh -L 8080:localhost:8080 <machine>`) works as well, and is the
+easiest way to use your webcam with a remote backend.
 
 ### Drive it from a terminal
 
@@ -98,8 +113,10 @@ tools/demo.py trace > run.json                          # events of the current 
 tools/summary.py run.json                               # per-lane numbers
 ```
 
-Set `DEMO_BACKEND` and `DEMO_TOKEN` to drive a remote backend. `tools/record.py` records the
-dashboard while a headless browser clicks through the acts; it made the video above.
+Set `DEMO_BACKEND` and `DEMO_TOKEN` to drive a remote backend. `tools/demo.py set
+'scenario="people"'` switches scenarios. `tools/record.py` records the dashboard while a
+headless browser clicks through the acts; it made the video above. `tools/webcam_check.py`
+checks the webcam path with Chromium's fake camera.
 
 ### Build from local clones
 
@@ -183,7 +200,13 @@ DESIGN.md         design notes
 
 ## Credits
 
-Clip: [DiagonalCrosswalkYongeDundas.webm](https://commons.wikimedia.org/wiki/File:DiagonalCrosswalkYongeDundas.webm),
-Wikimedia Commons, CC0. Models: YOLOX (Megvii, Apache-2.0); FCN ResNet-101, ResNet-152 v2,
-VGG-16 and VGG-16-BN from the ONNX Model Zoo (Apache-2.0; FCN weights from torchvision,
-BSD-3-Clause). The dashboard lists them as well.
+Clips, from Wikimedia Commons:
+[DiagonalCrosswalkYongeDundas.webm](https://commons.wikimedia.org/wiki/File:DiagonalCrosswalkYongeDundas.webm)
+(CC0) and
+[AFN InFocus- DDG117 holds Sevillanas dance Classes](https://commons.wikimedia.org/wiki/File:AFN_InFocus-_DDG117_holds_Sevillanas_dance_Classes_(960160).webm)
+(public domain, U.S. Department of Defense).
+
+Models: YOLOX (Megvii, Apache-2.0); YuNet (OpenCV Zoo, MIT); RTMPose-m (OpenMMLab, Apache-2.0);
+FER+, FCN ResNet-101, ResNet-152 v2, VGG-16 and VGG-16-BN from the ONNX Model Zoo (FER+ MIT,
+the others Apache-2.0; FCN weights from torchvision, BSD-3-Clause). The dashboard lists the
+assets of the selected scenario.

@@ -127,12 +127,15 @@ class Session:
             await methods.prepare_base(LANE_DIR, self.bus.emit)
         for v in scn["versions"]:
             scenario.materialize(scn, v)
-        clip = scn["frames"]
-        if clip["kind"] == "file":
+        src = scn["frames"]
+        # A camera scenario plays its fallback clip until a browser sends webcam frames.
+        clip = src if src["kind"] == "file" else src.get("fallback")
+        if clip:
             path = scenario.asset_path(clip["asset"], scn["assets"][clip["asset"]])
             self.bus.emit("prepare", step="decode clip")
-            decoded = await asyncio.to_thread(frames.decode_clip, path, clip["fps"], clip["width"])
-            self.source.load_clip(decoded, clip["fps"])
+            decoded = await asyncio.to_thread(frames.decode_clip, path, src["fps"], src["width"],
+                                              clip.get("start", 0), clip.get("end"))
+            self.source.load_clip(decoded, src["fps"])
         self.prepared = True
         self.bus.emit("prepare", step="ready", sizes={v: scenario.slot_sizes(scn, v)
                                                      for v in scn["versions"]})
@@ -153,18 +156,18 @@ class Session:
         await self.each(deploy)
 
     async def act_enable(self):
+        model = self.settings["scn"].get("enable", "segmenter")
         since = time.monotonic()
 
         async def enable(m):
-            status, msg = await m.enable("segmenter")
+            status, msg = await m.enable(model)
             if status == 409 and m.partial and not m.lazy:
                 # 2DFS pulled only the selected allotments: redeploy with a wider selection.
                 m.emit("redeploy", reason=msg)
                 await m.stop()
-                await m.deploy(sorted(set(m.selected) | {"segmenter"}),
-                               m.enabled + ["segmenter"])
-            await self.wait_for(m, "segmenter output",
-                                lambda meta: "segmenter" in meta.get("models", []), since)
+                await m.deploy(sorted(set(m.selected) | {model}), m.enabled + [model])
+            await self.wait_for(m, f"{model} output",
+                                lambda meta: model in meta.get("models", []), since)
         await self.each(enable)
 
     async def act_build_v2(self):
@@ -208,7 +211,8 @@ class Session:
         self.frames[lane].append(now)
         self.new_frame[lane].set()
         self.bus.emit("frame", lane, seq=seq, version=meta.get("version"),
-                      objects=sum(meta.get("counts", {}).values()), counts=meta.get("counts"),
+                      objects=meta.get("objects", sum(meta.get("counts", {}).values())),
+                      counts=meta.get("counts"),
                       ms=meta.get("infer_ms"), models=meta.get("models"))
 
     async def stats_loop(self):
@@ -290,6 +294,8 @@ async def info(request):
         "scenarios": scenario.available(),
         "scenario": {k: scn[k] for k in ("name", "title", "description", "slots",
                                          "docker_order", "select")} | {
+            "frames": scn["frames"]["kind"], "enable": scn.get("enable", "segmenter"),
+            "acts": scn.get("acts", {}),
             "versions": {v: {slot: spec.get("label", "")
                              for slot, spec in scenario.version_specs(scn, v).items()}
                          for v in scn["versions"]},
@@ -312,9 +318,10 @@ async def settings(request):
     for k, v in body.items():
         if k in allowed:
             s.settings[k] = v
-    if "scenario" in body:
+    if "scenario" in body and body["scenario"] != s.settings["scn"]["name"]:
         s.settings["scn"] = scenario.load(body["scenario"])
         s.prepared = False
+        asyncio.create_task(s.run_act("reset"))   # the old scenario's lanes go away
     if "lanes" in body:
         s.settings["lanes"] = [k for k in s.methods if k in body["lanes"]]
     s.link.bucket.set_rate(s.settings["link_mbit"] or None)

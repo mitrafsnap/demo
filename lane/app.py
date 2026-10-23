@@ -28,6 +28,16 @@ MODELS = os.environ.get("MODELS_DIR", "/models")
 THREADS = int(os.environ.get("THREADS", "2"))
 CONFIG = os.path.join(MODELS, "config.json")
 
+# How each model kind is used per frame: detectors run on every frame,
+# per-detection models on each detected box, async models in the background on
+# the latest frame (their last result is drawn until the next one is ready).
+ROLES = {"yolox": "detect", "yunet": "detect", "ferplus": "per-detection",
+         "voc-seg": "async", "rtmpose": "async", "imagenet-cls": "async"}
+
+
+def role(spec):
+    return spec.get("role") or ROLES[spec["kind"]]
+
 
 class Controller:
     """Keep-alive HTTP client to the controller, one per thread."""
@@ -64,12 +74,12 @@ class Lane:
         self.lock = threading.Lock()
         self.client = Controller()
         self.config_digest, self.config = self.read_config()
-        enabled = os.environ.get("ENABLED")
-        self.enabled = (set(enabled.split(",")) if enabled else
-                        {k for k, v in self.config["models"].items() if v.get("enabled")})
+        # Models the deployed version turns on, plus any the presenter enabled.
+        self.enabled = set(filter(None, os.environ.get("ENABLED", "").split(","))) | \
+            {k for k, v in self.config["models"].items() if v.get("enabled")}
         self.models = {}    # name -> (model, digest)
-        self.mask = None
-        self.frame = None   # latest frame, for the segmentation loop
+        self.results = {}   # async model -> last result
+        self.frame = None   # latest (frame, detections), for the async loop
 
     def read_config(self):
         with open(CONFIG, "rb") as f:
@@ -133,29 +143,62 @@ class Lane:
                 continue
             event(client, "reload_start", version=config["version"])
             with self.lock:
+                self.enabled |= {k for k, v in config["models"].items() if v.get("enabled")}
                 fresh, seconds = self.load_missing(config, "update")
                 self.config_digest = digest
-                self.mask = None
+                self.results = {}
                 self.swap(config, fresh)
             event(client, "reload_done", version=config["version"], models=sorted(fresh),
                   seconds=round(seconds, 3))
 
-    def segment_loop(self):
-        """Segment the latest frame whenever the segmenter is free. It is much
-        slower than detection, so frames keep flowing with the last mask."""
+    def async_loop(self):
+        """Run the async models on the latest frame whenever they are free. They
+        are slower than detection, so frames keep flowing with the last result."""
         while True:
-            seg, frame = self.models.get("segmenter"), self.frame
-            if seg is None or frame is None:
+            latest = self.frame
+            jobs = [(n, m) for n, m in self.models.items()
+                    if role(self.config["models"][n]) == "async"]
+            if latest is None or not jobs:
                 time.sleep(0.05)
                 continue
-            try:
-                self.mask = seg[0](frame)
-            except (OSError, EOFError):
-                time.sleep(0.05)  # worker replaced mid-call
+            frame, dets = latest
+            for name, (worker, _) in jobs:
+                kind = self.config["models"][name]["kind"]
+                payload = (frame, [d["box"] for d in dets]) if kind == "rtmpose" else frame
+                try:
+                    self.results[name] = worker(payload)
+                except (OSError, EOFError):
+                    time.sleep(0.05)  # worker replaced mid-call
+
+    def infer(self, frame, config, models):
+        """Detections with per-detection tags, plus overlays from async models."""
+        specs = config["models"]
+        dets = []
+        for name, (worker, _) in models.items():
+            if role(specs[name]) == "detect":
+                dets += worker(frame)
+        boxes = [d["box"] for d in dets]
+        for name, (worker, _) in models.items():
+            if role(specs[name]) == "per-detection" and boxes:
+                for d, tag in zip(dets, worker((frame, boxes))):
+                    if tag:
+                        d["tag"] = f"{tag[0]} {tag[1]:.2f}"
+        self.frame = (frame, dets)
+        overlays = {}
+        for name in models:
+            result = self.results.get(name)
+            if result is None:
+                continue
+            kind = specs[name]["kind"]
+            if kind == "voc-seg":
+                overlays["mask"] = (result, specs[name].get("classes", []))
+            elif kind == "rtmpose":
+                overlays["pose"] = result
+        return dets, overlays
 
     def run(self):
         threading.Thread(target=self.watch_config, daemon=True).start()
-        threading.Thread(target=self.segment_loop, daemon=True).start()
+        threading.Thread(target=self.async_loop, daemon=True).start()
         with self.lock:
             fresh, _ = self.load_missing(self.config, "start")
             self.swap(self.config, fresh)
@@ -171,22 +214,21 @@ class Lane:
             frame = cv2.imdecode(np.frombuffer(body, np.uint8), cv2.IMREAD_COLOR)
             t0 = time.perf_counter()
             config, models = self.config, self.models
-            det, seg = models.get("detector"), models.get("segmenter")
-            self.frame = frame
             try:
-                detections = det[0](frame) if det else []
+                detections, overlays = self.infer(frame, config, models)
             except (OSError, EOFError):
-                detections = []   # worker replaced mid-call
-            mask = self.mask if seg else None
+                detections, overlays = [], {}   # worker replaced mid-call
             infer_ms = (time.perf_counter() - t0) * 1000
-            seg_classes = config["models"].get("segmenter", {}).get("classes", [])
             label = f"{config['version']}  {' + '.join(sorted(models))}"
-            out = vision.draw(frame, detections, mask, seg_classes, label)
+            out = vision.draw(frame, detections, overlays, label)
             ok, jpg = cv2.imencode(".jpg", out, [cv2.IMWRITE_JPEG_QUALITY, 75])
             counts = {}
-            for name, _, _ in detections:
-                counts[name] = counts.get(name, 0) + 1
+            for d in detections:
+                for key in (d["name"], d.get("tag", "").split(" ")[0]):
+                    if key:
+                        counts[key] = counts.get(key, 0) + 1
             meta = {"version": config["version"], "infer_ms": round(infer_ms, 1),
+                    "objects": len(detections),
                     "counts": counts, "models": sorted(models)}
             self.client.request("POST", f"/internal/lanes/{LANE}/frame", jpg.tobytes(),
                                 {"Content-Type": "image/jpeg", "X-Seq": str(seq),

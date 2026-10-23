@@ -1,6 +1,6 @@
 # MitraFSnap live demo: design
 
-Status: draft, 2026-10-23.
+Status: implemented for both scenarios, 2026-10-23. README.md describes how to run it.
 
 ## Goal
 

@@ -9,14 +9,15 @@ import asyncio
 import cv2
 
 
-def decode_clip(path, fps, width):
+def decode_clip(path, fps, width, start=0, end=None):
     cap = cv2.VideoCapture(path)
     src_fps = cap.get(cv2.CAP_PROP_FPS) or 30
     step = src_fps / fps
-    frames, i, next_pick = [], 0, 0.0
+    first, last = start * src_fps, end * src_fps if end else float("inf")
+    frames, i, next_pick = [], 0, first
     while True:
         ok, frame = cap.read()
-        if not ok:
+        if not ok or i > last:
             break
         if i >= next_pick:
             h, w = frame.shape[:2]
