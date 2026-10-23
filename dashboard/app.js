@@ -259,7 +259,7 @@ function blindTime(L, start = L.updateAt, end = L.v2At != null ? L.updateAt + L.
   let blind = 0, last = start;
   for (const t of L.frames) {
     if (t <= start) continue;
-    if (t > until) break;
+    if (t > until + 0.05) break;   // the first new-version frame closes the window
     if (t - last > 0.5) blind += t - last;
     last = t;
   }

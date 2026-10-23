@@ -16,7 +16,7 @@ def gaps(frames, start, end, threshold=0.5):
     for t in frames:
         if t <= start:
             continue
-        if t > end:
+        if t > end + 0.05:   # the first new-version frame closes the window
             break
         if t - last > threshold:
             total += t - last
