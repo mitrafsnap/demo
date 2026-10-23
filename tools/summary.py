@@ -9,8 +9,9 @@ import json
 import sys
 
 
-def gaps(frames, start, end, threshold=0.5):
-    """Total and longest time without output between start and end."""
+def gaps(frames, start, end, threshold=1.0):
+    """Total and longest time without output between start and end. Gaps under
+    threshold are slow frames (a loaded CPU), not an outage."""
     total = longest = 0.0
     last = start
     for t in frames:

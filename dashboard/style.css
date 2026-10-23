@@ -72,6 +72,9 @@ button.ghost { background: transparent; }
 .act.error { border-color: var(--bad); }
 .act.reset { margin-left: auto; min-width: 0; justify-content: center; }
 
+.narration { margin: 0 20px; min-height: 22px; color: var(--muted); font-size: 15px; }
+.narration strong { color: var(--text); margin-right: 6px; }
+
 .workflow { padding: 0 20px; }
 #diagram { width: 100%; height: auto; max-height: 260px; display: block; }
 #diagram .node rect { fill: var(--panel); stroke: var(--line); }
@@ -101,6 +104,13 @@ button.ghost { background: transparent; }
 .lane header .phase { color: var(--muted); font-size: 12px; min-width: 90px; text-align: right; }
 .video { position: relative; background: #000; aspect-ratio: 16 / 9; }
 .video img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.video img:not([src]) { visibility: hidden; }
+.video .nosignal {
+  position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+  color: var(--muted); font-size: 15px; letter-spacing: .4px;
+}
+.video.stale img { opacity: .25; }
+.video.stale .nosignal { display: flex; }
 .video .badge {
   position: absolute; right: 8px; bottom: 8px; padding: 2px 8px; border-radius: 4px;
   background: rgba(0, 0, 0, .6); font-size: 12px;

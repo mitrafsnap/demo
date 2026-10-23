@@ -46,8 +46,13 @@ def lane_hash():
     return h.hexdigest()[:10]
 
 
+# Pinned by prepare, so editing the lane source mid-run can't change which base
+# later builds use.
+BASE_TAG = None
+
+
 def base_ref(variant):
-    return f"{REGISTRY}/base/lane-runtime:{variant}-{lane_hash()}"
+    return f"{REGISTRY}/base/lane-runtime:{variant}-{BASE_TAG or lane_hash()}"
 
 
 class Method:

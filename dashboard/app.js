@@ -11,6 +11,17 @@ const ACTS = [
   { id: "update", n: "Act 5", title: "Roll out v2", what: "replace vs refresh in place" },
   { id: "patch", n: "Act 6", title: "Patch unused model", what: "v3: build + roll out" },
 ];
+// One line per act for the caption under the act bar.
+const NARRATION = {
+  prepare: "Downloading the models and the clip, and publishing the lane runtime in three base formats.",
+  reset: "Clearing every lane, image and cache, so the next run starts cold.",
+  "build-v1": "Every method builds and pushes the same image. 2DFS and MitraFSnap build one allotment per model in parallel; BuildKit builds the layers one after another.",
+  deploy: "The camera needs only the detector. Docker and 2DFS download before they start; eStargz and MitraFSnap start lazily and fetch only what the app reads.",
+  enable: "Turning on the segmenter, a 217 MB model the camera did not fetch. Lazy methods fetch it on first use; 2DFS has to redeploy with a wider selection.",
+  "build-v2": "v2 ships a stronger detector that also recognizes bicycles, buses, trucks and streetcars. Only the changed parts are rebuilt.",
+  update: "Rolling out v2. Docker, eStargz and 2DFS stop, pull and restart. MitraFSnap refreshes the running container's files in place and the app swaps models while it keeps serving.",
+  patch: "v3 patches a 528 MB model this camera never loads. Replacement restarts the camera anyway; MitraFSnap refreshes in milliseconds and fetches nothing.",
+};
 const COLORS = { docker: "--docker", estargz: "--estargz", twodfs: "--twodfs", mitrafsnap: "--mitrafsnap" };
 const LETTER = { docker: "D", estargz: "E", twodfs: "2", mitrafsnap: "M" };
 const TAGS = {
@@ -116,10 +127,32 @@ async function connect() {
     for (const ev of trace.events) if (ev.kind !== "sample") onEvent(ev);
     for (const ev of trace.events.slice(-1)) if (ev.kind === "sample") onEvent({ ...ev, kind: "stats" });
   } catch (e) { /* older backend without a trace: start empty */ }
+  openVideo();
   state.es = new EventSource(url("/api/events"));
   state.es.onopen = () => setStatus(`${state.info.backend.arch} · ${state.info.backend.cpus} CPUs`, "ok");
   state.es.onerror = () => setStatus("reconnecting", "bad");
   state.es.onmessage = (m) => onEvent(JSON.parse(m.data));
+}
+
+// Lane frames arrive over one WebSocket: [lane index byte][JPEG].
+function openVideo() {
+  if (state.ws) { state.ws.onclose = null; state.ws.close(); }
+  const u = new URL(url("/api/video"), location.href);
+  u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(u.href);
+  ws.binaryType = "arraybuffer";
+  ws.onmessage = (m) => {
+    const lane = state.info.methods[new Uint8Array(m.data, 0, 1)[0]]?.key;
+    const img = lane && laneEl(lane, ".video img");
+    if (!img) return;
+    const blob = new Blob([new Uint8Array(m.data, 1)], { type: "image/jpeg" });
+    const old = img.dataset.url;
+    img.src = img.dataset.url = URL.createObjectURL(blob);
+    if (old) URL.revokeObjectURL(old);
+    state.lanes[lane].shownAt = performance.now();
+  };
+  ws.onclose = () => setTimeout(() => { if (state.ws === ws) openVideo(); }, 1000);
+  state.ws = ws;
 }
 
 function setStatus(text, cls) {
@@ -170,6 +203,10 @@ function renderActs() {
     </button>`;
   }).join("") + `<button class="act reset" data-act="reset" ${state.running ? "disabled" : ""}>Reset</button>`;
   $("#acts").innerHTML = html;
+  const shown = state.lastAct;
+  const act = ACTS.find((a) => a.id === shown);
+  $("#narration").innerHTML = shown && NARRATION[shown]
+    ? `<strong>${act ? `${act.n} · ${act.title}` : "Reset"}</strong> ${NARRATION[shown]}` : "";
   for (const b of document.querySelectorAll("#acts button")) {
     b.onclick = () => runAct(b.dataset.act);
   }
@@ -196,7 +233,8 @@ function renderLanes() {
         <span class="tags">${TAGS[k].map((t) => `<span class="pill">${t}</span>`).join("")}</span>
         <span class="phase" data-f="phase">idle</span>
       </header>
-      <div class="video"><img alt="${m.title} output" src="${url(`/api/lanes/${k}/video`)}">
+      <div class="video"><img alt="${m.title} output">
+        <span class="nosignal" data-f="nosignal">no output</span>
         <span class="badge" data-f="badge"></span></div>
       <canvas class="timeline" data-f="timeline" width="760" height="34"></canvas>
       <div class="metrics">
@@ -220,7 +258,9 @@ function updateLane(k) {
   if (!document.getElementById(`lane-${k}`)) return;
   laneEl(k, "[data-f=phase]").textContent = L.phase;
   const fps = L.frames.filter((t) => now() - t < 2).length / 2;
-  laneEl(k, "[data-f=badge]").textContent = L.version ? `${L.version} · ${fps.toFixed(1)} fps` : "";
+  laneEl(k, "[data-f=badge]").textContent = L.version && fps ? `${L.version} · ${fps.toFixed(1)} fps` : "";
+  const stale = !L.shownAt || performance.now() - L.shownAt > 1500;
+  laneEl(k, ".video").classList.toggle("stale", stale);
   const set = (id, html, cls = "") => {
     const el = laneEl(k, `[data-m=${id}]`);
     el.innerHTML = html;
@@ -235,7 +275,7 @@ function updateLane(k) {
   if (L.v2At != null) {
     set("v2", secs(L.v2At), "");
     const gap = blindTime(L);
-    set("gap", gap < 0.5 ? "0 s" : secs(gap), gap < 0.5 ? "good" : "bad");
+    set("gap", gap === 0 ? "0 s" : secs(gap), gap === 0 ? "good" : "bad");
   } else {
     set("v2", L.updateAt != null ? "…" : "–");
     set("gap", L.updateAt != null ? secs(blindTime(L)) : "–", L.updateAt != null ? "bad" : "");
@@ -245,7 +285,7 @@ function updateLane(k) {
     const done = L.v3At != null;
     const pgap = blindTime(L, L.patchAt, done ? L.patchAt + L.v3At : null);
     set("pdown", mb((L.patchBytes ?? L.bytes) - L.patchBytes0));
-    set("pgap", done && pgap < 0.5 ? "0 s" : secs(pgap), done && pgap < 0.5 ? "good" : "bad");
+    set("pgap", done && pgap === 0 ? "0 s" : secs(pgap), done && pgap === 0 ? "good" : "bad");
   } else {
     set("pdown", "–");
     set("pgap", "–");
@@ -253,17 +293,19 @@ function updateLane(k) {
 }
 
 // Seconds without output between the start of a rollout and the new version
-// going live (or now, while it hasn't).
+// going live (or now, while it hasn't). Gaps under BLIND are slow frames on a
+// loaded CPU, not an outage.
+const BLIND = 1.0;
 function blindTime(L, start = L.updateAt, end = L.v2At != null ? L.updateAt + L.v2At : null) {
   const until = end ?? now();
   let blind = 0, last = start;
   for (const t of L.frames) {
     if (t <= start) continue;
     if (t > until + 0.05) break;   // the first new-version frame closes the window
-    if (t - last > 0.5) blind += t - last;
+    if (t - last > BLIND) blind += t - last;
     last = t;
   }
-  if (end == null && until - last > 0.5) blind += until - last;
+  if (end == null && until - last > BLIND) blind += until - last;
   return blind;
 }
 
@@ -281,7 +323,7 @@ function drawTimeline(k) {
   let last = Math.max(t0, deployed);
   for (const t of L.frames.concat([t1])) {
     if (t < t0) { last = Math.max(last, t); continue; }
-    if (t - last > 0.5 && last >= deployed) g.fillRect(x(last), 0, x(t) - x(last), h);
+    if (t - last > BLIND && last >= deployed) g.fillRect(x(last), 0, x(t) - x(last), h);
     last = t;
   }
   g.fillStyle = cssVar(COLORS[k]);
@@ -354,7 +396,7 @@ function onEvent(ev) {
     case "act":
       state.acts[ev.act] = { state: ev.state, t: ev.state === "start" ? ev.t : state.acts[ev.act]?.t };
       state.running = ev.state === "start" ? ev.act : null;
-      if (ev.state === "start") onActStart(ev);
+      if (ev.state === "start") { state.lastAct = ev.act; onActStart(ev); }
       log(`${ev.act} ${ev.state}${ev.seconds != null ? ` in ${secs(ev.seconds)}` : ""}${ev.error ? `: ${ev.error}` : ""}`);
       renderActs();
       return;

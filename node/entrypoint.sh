@@ -14,6 +14,11 @@ if uname -r | grep -q linuxkit && ! grep -q disable_xattrs "$CONF"; then
   sed -i 's/^\[fuse\]$/[fuse]\n  disable_xattrs = true/' "$CONF"
 fi
 
+# Start every boot cold: a restored snapshot would otherwise resume fetching
+# from a previous run. The controller's startup reset removes what containerd
+# still lists.
+rm -rf /var/lib/containerd-stargz-grpc/*
+
 (
   while true; do
     containerd-stargz-grpc --log-level=info \

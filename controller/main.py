@@ -8,7 +8,9 @@ Public API (dashboard):
                                          build-v2 | update | patch | reset
     GET  /api/events                     server-sent events
     GET  /api/trace                      recorded events of the current run
-    GET  /api/lanes/{lane}/video         MJPEG of the lane's annotated output
+    GET  /api/video                      WebSocket: every lane's annotated frames,
+                                         each message = lane index byte + JPEG
+    GET  /api/lanes/{lane}/video         MJPEG of one lane's annotated output
     GET  /api/source/video               MJPEG of the raw frames
     GET  /api/camera                     WebSocket: browser webcam frames in
 
@@ -66,6 +68,8 @@ class Session:
             await self.link.add(key, 5101 + i)
         self.source.start()
         asyncio.create_task(self.stats_loop())
+        # Containers from a previous controller survive in containerd; start clean.
+        asyncio.create_task(self.run_act("reset"))
 
     def public_settings(self):
         return {k: v for k, v in self.settings.items() if k != "scn"}
@@ -118,6 +122,7 @@ class Session:
     async def act_prepare(self):
         scn = self.settings["scn"]
         await scenario.fetch_assets(scn, self.bus.emit)
+        methods.BASE_TAG = methods.lane_hash()
         if not await asyncio.to_thread(methods.base_ready):
             await methods.prepare_base(LANE_DIR, self.bus.emit)
         for v in scn["versions"]:
@@ -380,6 +385,26 @@ async def lane_video(request):
     return await mjpeg(request, get_frame)
 
 
+async def video_ws(request):
+    """All lanes over one WebSocket. Browsers cap HTTP/1.1 connections per host
+    at six, so one MJPEG stream per lane stalls once four lanes are shown."""
+    ws = web.WebSocketResponse(heartbeat=20)
+    await ws.prepare(request)
+    keys = list(session.methods)
+    sent = {k: None for k in keys}
+    try:
+        while not ws.closed:
+            for i, k in enumerate(keys):
+                latest = session.latest.get(k)
+                if latest is not None and latest is not sent[k]:
+                    sent[k] = latest
+                    await ws.send_bytes(bytes([i]) + latest[1])
+            await asyncio.sleep(0.03)
+    except (ConnectionResetError, asyncio.CancelledError):
+        pass
+    return ws
+
+
 async def source_video(request):
     seq = [0]
 
@@ -448,6 +473,7 @@ async def main():
         web.post("/api/acts/{act}", act),
         web.get("/api/events", events),
         web.get("/api/trace", trace),
+        web.get("/api/video", video_ws),
         web.get("/api/lanes/{lane}/video", lane_video),
         web.get("/api/source/video", source_video),
         web.get("/api/camera", camera),
