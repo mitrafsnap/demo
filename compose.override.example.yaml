@@ -8,3 +8,9 @@ services:
       additional_contexts:
         snapshotter: ../stargz-snapshotter
         builder: ../2dfs-builder
+    # Live-edit the controller, dashboard and scenarios: restart the node to reload.
+    volumes:
+      - ./controller:/opt/demo/controller
+      - ./dashboard:/opt/demo/dashboard
+      - ./scenarios:/opt/demo/scenarios
+      - ./lane:/opt/demo/lane

@@ -1,5 +1,10 @@
 version = 3
 
+# Each method runs in its own namespace. Isolated content means a lane can
+# never reuse blobs another lane already downloaded.
+[plugins."io.containerd.metadata.v1.bolt"]
+  content_sharing_policy = "isolated"
+
 [proxy_plugins.stargz]
   type = "snapshot"
   address = "/run/containerd-stargz-grpc/containerd-stargz-grpc.sock"

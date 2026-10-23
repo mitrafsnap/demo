@@ -37,7 +37,8 @@ ARG RUNC_VERSION=1.3.4
 ARG NERDCTL_VERSION=2.2.1
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      ca-certificates curl fuse3 iptables iproute2 jq python3 tini && \
+      ca-certificates curl fuse3 iptables iproute2 jq python3 tini \
+      python3-aiohttp python3-numpy python3-opencv && \
     rm -rf /var/lib/apt/lists/*
 
 # nerdctl-full bundles containerd, buildkitd, buildctl, CNI plugins and runc;
@@ -53,6 +54,12 @@ COPY --from=build-snapshotter /out/ /usr/local/bin/
 COPY --from=build-tdfs /out/ /usr/local/bin/
 COPY etc/ /etc/
 COPY entrypoint.sh /usr/local/bin/node-entrypoint
+# The rest of the demo comes from the repo root (compose context "demo").
+COPY --from=demo controller/ /opt/demo/controller/
+COPY --from=demo lane/ /opt/demo/lane/
+COPY --from=demo scenarios/ /opt/demo/scenarios/
+COPY --from=demo dashboard/ /opt/demo/dashboard/
 
-VOLUME ["/var/lib/containerd", "/var/lib/containerd-stargz-grpc", "/var/lib/buildkit"]
+VOLUME ["/var/lib/containerd", "/var/lib/containerd-stargz-grpc", "/var/lib/buildkit", "/var/lib/demo"]
+EXPOSE 8080
 ENTRYPOINT ["tini", "--", "node-entrypoint"]

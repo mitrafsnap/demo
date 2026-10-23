@@ -8,5 +8,20 @@ metrics_address = "0.0.0.0:8234"
   host = "registry:5000"
   insecure = true
 
+# Lanes reach the registry through the controller's emulated link (link.py),
+# one port per method.
+[[resolver.host."127.0.0.1:5101".mirrors]]
+  host = "127.0.0.1:5101"
+  insecure = true
+[[resolver.host."127.0.0.1:5102".mirrors]]
+  host = "127.0.0.1:5102"
+  insecure = true
+[[resolver.host."127.0.0.1:5103".mirrors]]
+  host = "127.0.0.1:5103"
+  insecure = true
+[[resolver.host."127.0.0.1:5104".mirrors]]
+  host = "127.0.0.1:5104"
+  insecure = true
+
 [fuse]
   passthrough = true

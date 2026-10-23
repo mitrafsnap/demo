@@ -1,0 +1,136 @@
+{
+  "name": "traffic",
+  "title": "Traffic camera",
+  "description": "A city camera at a busy crossing. v2 ships a stronger detector that also recognizes bicycles, motorcycles, buses, trucks and streetcars. v3 patches a large model this camera never uses.",
+  "frames": {
+    "kind": "file",
+    "asset": "clip",
+    "fps": 10,
+    "width": 960
+  },
+  "slots": [
+    "detector",
+    "segmenter",
+    "classifier",
+    "aux",
+    "config"
+  ],
+  "docker_order": [
+    "aux",
+    "classifier",
+    "segmenter",
+    "detector",
+    "config"
+  ],
+  "select": [
+    "detector",
+    "config"
+  ],
+  "assets": {
+    "clip": {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/d/d2/DiagonalCrosswalkYongeDundas.webm",
+      "license": "CC0 1.0",
+      "credit": "File:DiagonalCrosswalkYongeDundas.webm, Wikimedia Commons"
+    },
+    "yolox_tiny": {
+      "url": "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.onnx",
+      "license": "Apache-2.0",
+      "credit": "YOLOX, Megvii"
+    },
+    "yolox_s": {
+      "url": "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_s.onnx",
+      "license": "Apache-2.0",
+      "credit": "YOLOX, Megvii"
+    },
+    "fcn_resnet101": {
+      "url": "https://github.com/onnx/models/raw/main/validated/vision/object_detection_segmentation/fcn/model/fcn-resnet101-11.onnx",
+      "license": "BSD-3-Clause (torchvision weights), ONNX Model Zoo",
+      "credit": "FCN ResNet-101"
+    },
+    "resnet152": {
+      "url": "https://github.com/onnx/models/raw/main/validated/vision/classification/resnet/model/resnet152-v2-7.onnx",
+      "license": "Apache-2.0, ONNX Model Zoo",
+      "credit": "ResNet-152 v2"
+    },
+    "vgg16": {
+      "url": "https://github.com/onnx/models/raw/main/validated/vision/classification/vgg/model/vgg16-12.onnx",
+      "license": "Apache-2.0, ONNX Model Zoo",
+      "credit": "VGG-16"
+    },
+    "vgg16_bn": {
+      "url": "https://github.com/onnx/models/raw/main/validated/vision/classification/vgg/model/vgg16-bn-7.onnx",
+      "license": "Apache-2.0, ONNX Model Zoo",
+      "credit": "VGG-16-BN"
+    }
+  },
+  "versions": {
+    "v1": {
+      "detector": {
+        "asset": "yolox_tiny",
+        "file": "detector.onnx",
+        "kind": "yolox",
+        "input": 416,
+        "classes": [
+          "person",
+          "car"
+        ],
+        "enabled": true,
+        "label": "YOLOX-Tiny: people, cars"
+      },
+      "segmenter": {
+        "asset": "fcn_resnet101",
+        "file": "segmenter.onnx",
+        "kind": "voc-seg",
+        "width": 384,
+        "classes": [
+          "person",
+          "car",
+          "bus",
+          "bicycle",
+          "motorbike",
+          "train"
+        ],
+        "label": "FCN ResNet-101 segmentation"
+      },
+      "classifier": {
+        "asset": "resnet152",
+        "file": "classifier.onnx",
+        "kind": "imagenet-cls",
+        "label": "ResNet-152 classifier (unused by this camera)"
+      },
+      "aux": {
+        "asset": "vgg16",
+        "file": "aux.onnx",
+        "kind": "imagenet-cls",
+        "label": "VGG-16 classifier (unused by this camera)"
+      }
+    },
+    "v2": {
+      "detector": {
+        "asset": "yolox_s",
+        "file": "detector.onnx",
+        "kind": "yolox",
+        "input": 640,
+        "classes": [
+          "person",
+          "bicycle",
+          "car",
+          "motorcycle",
+          "bus",
+          "truck",
+          "train"
+        ],
+        "enabled": true,
+        "label": "YOLOX-S: + bicycles, motorcycles, buses, trucks, streetcars"
+      }
+    },
+    "v3": {
+      "aux": {
+        "asset": "vgg16_bn",
+        "file": "aux.onnx",
+        "kind": "imagenet-cls",
+        "label": "VGG-16-BN classifier, patched (unused by this camera)"
+      }
+    }
+  }
+}

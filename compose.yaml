@@ -22,7 +22,8 @@ services:
     build:
       context: node
       additional_contexts:
-        snapshotter: https://github.com/mitrafsnap/stargz-snapshotter.git#fuse-disable-xattrs
+        demo: .
+        snapshotter: https://github.com/mitrafsnap/stargz-snapshotter.git#demo
         builder: https://github.com/mitrafsnap/2dfs-builder.git#main
     privileged: true
     cgroup: host
@@ -30,14 +31,21 @@ services:
       - /dev/fuse
     depends_on:
       - registry
+    environment:
+      DEMO_TOKEN: ${DEMO_TOKEN:-}
+    ports:
+      # Set DEMO_BIND=0.0.0.0 (and DEMO_TOKEN) to reach the backend from other machines.
+      - "${DEMO_BIND:-127.0.0.1}:8080:8080"
     volumes:
       - containerd:/var/lib/containerd
       - stargz:/var/lib/containerd-stargz-grpc
       - buildkit:/var/lib/buildkit
       - tdfs:/root/.2dfs
+      - demo:/var/lib/demo
       - ./node:/smoke:ro
 
 volumes:
+  demo:
   registry-data:
   containerd:
   stargz:

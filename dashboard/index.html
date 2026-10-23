@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MitraFSnap Live Demo</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="logo">MitraFSnap</span>
+      <span class="sub">live demo</span>
+    </div>
+    <div class="conn">
+      <label>Backend <input id="backend" spellcheck="false" placeholder="same origin"></label>
+      <label class="token">Token <input id="token" type="password" placeholder="none"></label>
+      <button id="connect">Connect</button>
+      <span id="status" class="pill">offline</span>
+    </div>
+  </header>
+
+  <section class="controls">
+    <div class="group">
+      <span class="label">Scenario</span>
+      <select id="scenario"></select>
+      <span id="scenario-desc" class="desc"></span>
+    </div>
+    <div class="group">
+      <span class="label">Methods</span>
+      <div id="lane-toggles" class="toggles"></div>
+      <button id="all-lanes" class="ghost">Show all</button>
+    </div>
+    <div class="group">
+      <span class="label">Edge link</span>
+      <select id="link">
+        <option value="50">50 Mbit/s</option>
+        <option value="100">100 Mbit/s</option>
+        <option value="200">200 Mbit/s</option>
+        <option value="500">500 Mbit/s</option>
+        <option value="1000">1 Gbit/s</option>
+        <option value="0">unlimited</option>
+      </select>
+      <span class="pill mode" title="All shown methods run at the same time on one machine and share its CPU and link.">live mode</span>
+    </div>
+  </section>
+
+  <nav class="acts" id="acts"></nav>
+
+  <section class="workflow">
+    <svg id="diagram" viewBox="0 0 1300 250" preserveAspectRatio="xMidYMid meet" role="img"
+         aria-label="Workflow from build to serving, with replace and refresh update paths"></svg>
+  </section>
+
+  <main id="lanes" class="lanes"></main>
+
+  <section class="bottom">
+    <details id="log-box">
+      <summary>Event log</summary>
+      <ol id="log"></ol>
+    </details>
+    <p id="credits" class="credits"></p>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>
