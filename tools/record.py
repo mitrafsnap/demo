@@ -18,7 +18,7 @@ import urllib.request
 
 from playwright.sync_api import sync_playwright
 
-ACTS = ["prepare", "reset", "build-v1", "deploy", "enable", "build-v2", "update", "patch"]
+ACTS = ["prepare", "reset", "build-v1", "deploy", "add-model", "build-v3", "rollout-v3", "patch"]
 
 ap = argparse.ArgumentParser()
 ap.add_argument("base")
@@ -27,6 +27,7 @@ ap.add_argument("--scenario", default="traffic")
 ap.add_argument("--width", type=int, default=1920)
 ap.add_argument("--height", type=int, default=1080)
 ap.add_argument("--hold", type=float, default=4, help="seconds to show each act's result")
+ap.add_argument("--speed", default="2", help="playback speed the intro card announces")
 ap.add_argument("--check", action="store_true", help="one screenshot, no acts")
 args = ap.parse_args()
 LANES = ["docker", "estargz", "twodfs", "mitrafsnap"] if args.lanes == "all" else args.lanes.split(",")
@@ -68,13 +69,19 @@ with sync_playwright() as p:
     browser = p.chromium.launch()
     page = browser.new_page(viewport={"width": args.width, "height": args.height})
     page.on("pageerror", lambda e: print("pageerror:", e))
+    if not args.check:
+        os.makedirs("/out/frames", exist_ok=True)
+        for slide in (1, 2):   # title cards for the start of the video
+            page.goto(f"{args.base}/?backend={args.base}&intro={slide}&speed={args.speed}")
+            page.wait_for_selector(".intro", timeout=30_000)
+            page.wait_for_timeout(800)
+            page.screenshot(path=f"/out/intro-{slide}.png")
     page.goto(f"{args.base}/?backend={args.base}")
     page.wait_for_selector("#status.ok", timeout=30_000)
     page.wait_for_timeout(1500)
     if args.check:
         page.screenshot(path="/out/check.png")
     else:
-        os.makedirs("/out/frames", exist_ok=True)
         done = threading.Event()
         threading.Thread(target=run_acts, args=(done,), daemon=True).start()
         stamps = []

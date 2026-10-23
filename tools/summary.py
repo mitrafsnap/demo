@@ -29,49 +29,46 @@ def gaps(frames, start, end, threshold=1.0):
 def main():
     trace = json.load(open(sys.argv[1]) if len(sys.argv) > 1 else sys.stdin)
     ev = trace["events"]
+    samples = [e for e in ev if e["kind"] == "sample"]
     acts = {e["act"]: e["t"] for e in ev if e["kind"] == "act" and e["state"] == "start"}
-    lanes = trace["settings"]["lanes"]
     rows = []
-    for lane in lanes:
+    for lane in trace["settings"]["lanes"]:
         mine = [e for e in ev if e.get("lane") == lane]
         frames = [e["t"] for e in mine if e["kind"] == "frame"]
-        phase = lambda p, **k: [e for e in mine if e["kind"] == "phase" and e["phase"] == p
-                                and e["state"] == "end" and all(e.get(a) == b for a, b in k.items())]
         ready = {e["what"]: e["seconds"] for e in mine if e["kind"] == "ready"}
-        build = lambda v: sum(e["seconds"] for p in ("build", "push") for e in phase(p, version=v))
-        samples = [e for e in ev if e["kind"] == "sample"]
 
         def bytes_at(t):
             prior = [s["lanes"][lane]["bytes"] for s in samples if s["t"] <= t]
             return prior[-1] if prior else 0
 
-        upd = acts.get("update")
-        v2 = ready.get("v2 live")
-        blind, longest = gaps(frames, upd, upd + v2) if upd is not None and v2 else (None, None)
-        rollout = [e["t"] for e in mine if e["kind"] == "rollout" and e.get("version") == "v3"]
-        v3 = ready.get("v3 live")
-        p_blind = p_longest = p_mb = None
-        if rollout and v3:
-            p_blind, p_longest = gaps(frames, rollout[0], rollout[0] + v3)
-            p_mb = round((bytes_at(rollout[0] + v3 + 1) - bytes_at(rollout[0])) / 1e6)
-        steady = [t for t in frames if acts.get("enable", 0) - 10 < t < acts.get("enable", 0)]
-        rows.append({
-            "lane": lane,
-            "build v1 (s)": round(build("v1"), 1), "build v2 (s)": round(build("v2"), 1),
-            "first frame (s)": ready.get("first frame"),
-            "MB by first frame": round(bytes_at(acts["deploy"] + (ready.get("first frame") or 0) + 1) / 1e6),
-            "enabled model (s)": next((v for k, v in ready.items() if k.endswith(" output")), None),
-            "v2 live (s)": v2, "blind (s)": blind and round(blind, 2),
-            "longest gap (s)": longest and round(longest, 2),
-            "v3 build (s)": round(build("v3"), 1), "v3 live (s)": v3,
-            "v3 blind (s)": p_blind and round(p_blind, 2), "v3 MB": p_mb,
-            "fps before act 3": round(len(steady) / 10, 1),
-            "MB total": round(samples[-1]["lanes"][lane]["bytes"] / 1e6) if samples else None,
-        })
-    keys = list(rows[0])
+        def build(v):
+            return round(sum(e["seconds"] for e in mine if e["kind"] == "phase"
+                             and e["phase"] in ("build", "push") and e["state"] == "end"
+                             and e.get("version") == v), 1)
+
+        row = {"lane": lane}
+        for v in ("v1", "v2", "v3", "v4"):
+            row[f"build {v} (s)"] = build(v)
+        first = ready.get("first frame")
+        row["first frame (s)"] = first
+        row["MB by first frame"] = round(bytes_at(acts["deploy"] + (first or 0) + 1) / 1e6) \
+            if "deploy" in acts else None
+        for e in mine:
+            if e["kind"] != "rollout":
+                continue
+            v, start = e["version"], e["t"]
+            live = ready.get(f"{v} live")
+            blind = gaps(frames, start, start + live)[0] if live else None
+            row[f"{v} live (s)"] = live
+            row[f"{v} blind (s)"] = blind if blind is None else round(blind, 2)
+            row[f"{v} MB"] = round((bytes_at(start + (live or 0) + 1) - bytes_at(start)) / 1e6) \
+                if live else None
+        row["MB total"] = round(samples[-1]["lanes"][lane]["bytes"] / 1e6) if samples else None
+        rows.append(row)
+    keys = list(dict.fromkeys(k for r in rows for k in r))
     width = max(len(k) for k in keys)
     for k in keys:
-        print(f"{k:<{width}}  " + "  ".join(f"{str(r[k]):>12}" for r in rows))
+        print(f"{k:<{width}}  " + "  ".join(f"{str(r.get(k)):>12}" for r in rows))
 
 
 if __name__ == "__main__":

@@ -169,6 +169,64 @@ button.ghost { background: transparent; }
 .metric .v.bad { color: var(--bad); }
 .metric .v small { font-size: 12px; color: var(--muted); }
 
+/* ---- comparison charts ---------------------------------------------- */
+
+.compare { padding: 4px 20px 8px; }
+.compare-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 6px; }
+.compare-head h2 { font-size: 17px; margin: 0; }
+.compare-head button { margin-left: auto; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 14px; }
+.legend .key, .tip div { display: flex; align-items: center; gap: 6px; }
+.dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex: none; }
+.charts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.chart {
+  margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 8px 10px 4px; min-width: 0;
+}
+.chart figcaption { display: flex; flex-direction: column; margin-bottom: 2px; }
+.chart figcaption strong { font-size: 15px; }
+.chart figcaption span { color: var(--muted); font-size: 12px; }
+.chart svg { width: 100%; height: auto; display: block; }
+.chart .grid { stroke: var(--panel-2); stroke-width: 1; }
+.chart .axis { stroke: var(--line); stroke-width: 1; }
+.chart .actline { stroke: var(--line); stroke-width: 1; }
+.chart .tick, .chart .cat { fill: var(--muted); font: 12px var(--font); }
+.chart .cat { font-size: 13px; }
+.chart .value { fill: var(--text); font: 700 13px var(--font); }
+.chart .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .end { stroke: var(--panel); stroke-width: 2; }
+.chart .crosshair { stroke: var(--muted); stroke-width: 1; }
+.chart .hit { fill: transparent; }
+.chart table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.chart th, .chart td { text-align: right; padding: 3px 6px; border-bottom: 1px solid var(--line); }
+.chart th:first-child { text-align: left; color: var(--muted); font-weight: 400; }
+.tip {
+  position: absolute; z-index: 10; pointer-events: none; background: var(--panel-2);
+  border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; font-size: 13px;
+}
+
+/* ---- intro cards (recorded videos) -------------------------------------- */
+
+.intro {
+  position: fixed; inset: 0; z-index: 20; background: var(--bg); padding: 7vh 9vw;
+  display: flex; flex-direction: column; justify-content: center; gap: 18px; overflow: hidden;
+}
+.intro .kicker { color: var(--muted); font-size: 22px; margin: 0; letter-spacing: .5px; }
+.intro h1 { font-size: 58px; margin: 0; }
+.intro .lead { font-size: 26px; margin: 0; max-width: 1400px; color: var(--text); }
+.intro .methods { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 12px; }
+.intro .methods li { display: flex; align-items: center; gap: 14px; font-size: 24px; color: var(--muted); }
+.intro .methods strong { color: var(--text); min-width: 150px; }
+.intro .methods .dot { width: 18px; height: 18px; border-radius: 4px; }
+.intro .facts { font-size: 22px; color: var(--muted); margin: 0; max-width: 1500px; }
+.intro .speed { font-size: 26px; margin: 0; border: 1px solid var(--warn); color: var(--text);
+  border-radius: 10px; padding: 12px 18px; align-self: flex-start; }
+.intro .actlist { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 16px; }
+.intro .actlist li { display: grid; grid-template-columns: 110px 1fr; gap: 18px; align-items: baseline; }
+.intro .actlist .n { color: var(--muted); font-size: 22px; }
+.intro .actlist strong { font-size: 27px; }
+.intro .actlist p { margin: 2px 0 0; font-size: 20px; color: var(--muted); max-width: 1400px; }
+
 .bottom { padding: 0 20px 20px; }
 #log { max-height: 260px; overflow: auto; font: 12px/1.5 ui-monospace, SFMono-Regular, monospace;
        color: var(--muted); padding-left: 0; list-style: none; }
@@ -182,9 +240,12 @@ button.ghost { background: transparent; }
   .lane .body { grid-template-columns: minmax(0, 1fr); }
   .metrics { border-left: 0; border-top: 1px solid var(--line); }
 }
+@media (max-width: 1700px) {
+  .charts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 /* one lane column */
 @media (max-width: 1000px) {
-  .lanes { grid-template-columns: minmax(0, 1fr); }
+  .lanes, .charts { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 700px) {
   :root { font-size: 14px; }

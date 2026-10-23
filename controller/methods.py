@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import shutil
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -51,23 +52,47 @@ def lane_hash():
 BASE_TAG = None
 
 
-def gpu_available():
-    """A GPU passed into the node (compose.gpu.yaml) that ctr run --gpus can
-    hand to lane containers through nvidia-container-cli."""
+ACCEL_PORT = int(os.environ.get("DEMO_ACCEL_PORT", "8090"))
+
+
+def cuda_available():
+    """An NVIDIA GPU passed into the node (compose.gpu.yaml) that ctr run --gpus
+    can hand to lane containers through nvidia-container-cli."""
     return os.path.exists("/dev/nvidia0") and shutil.which("nvidia-container-cli") is not None
 
 
+def apple_url():
+    """URL of the Apple GPU helper (tools/accel) on the Docker Desktop host, as
+    an IP address: lane containers can't resolve host.docker.internal."""
+    try:
+        ip = socket.gethostbyname("host.docker.internal")
+        with urllib.request.urlopen(f"http://{ip}:{ACCEL_PORT}/health", timeout=1):
+            return f"http://{ip}:{ACCEL_PORT}"
+    except OSError:
+        return None
+
+
+def accelerators():
+    return {"cuda": cuda_available(), "apple": apple_url() is not None}
+
+
 def device(setting):
-    """Effective device for a setting of auto, gpu or cpu."""
+    """Effective device (cuda, apple or cpu) for a setting of auto, gpu or cpu."""
     if setting == "cpu":
         return "cpu"
-    if setting == "gpu" and not gpu_available():
-        raise RuntimeError("device is set to gpu, but the node has no GPU (see compose.gpu.yaml)")
-    return "gpu" if gpu_available() else "cpu"
+    found = accelerators()
+    for dev in ("cuda", "apple"):
+        if found[dev]:
+            return dev
+    if setting == "gpu":
+        raise RuntimeError("device is set to GPU, but there is none: pass an NVIDIA GPU with "
+                           "compose.gpu.yaml or start tools/accel/run.sh on a Mac")
+    return "cpu"
 
 
 def base_tag(dev):
-    return f"{dev}-{lane_hash()}"
+    """The lane runtime differs only for CUDA; the Apple helper runs outside it."""
+    return f"{'cuda' if dev == 'cuda' else 'cpu'}-{lane_hash()}"
 
 
 def base_ref(variant):
@@ -175,9 +200,11 @@ class Method:
                "THREADS": str(self.settings.get("threads", 2)),
                "ENABLED": ",".join(self.enabled)}
         env["DEVICE"] = self.settings.get("effective_device", "cpu")
-        args = ["run", "-d", "--net-host"]
-        if env["DEVICE"] == "gpu":
+        args = ["run", "-d", "--net-host", f"--log-uri=file:///var/log/node/{self.container}.log"]
+        if env["DEVICE"] == "cuda":
             args += ["--gpus", "0"]
+        if env["DEVICE"] == "apple":
+            env["ACCEL_URL"] = apple_url() or ""
         if self.lazy:
             args.append("--snapshotter=stargz")
         if cpus:
@@ -212,24 +239,7 @@ class Method:
         await self.phase("stop", kill())
         self.deployed = None
 
-    # -- act 3: enable a model ----------------------------------------------
-
-    async def enable(self, model):
-        def call():
-            req = urllib.request.Request(
-                f"http://127.0.0.1:{self.port}/enable?model={model}", method="POST")
-            try:
-                with urllib.request.urlopen(req, timeout=600) as r:
-                    return r.status, r.read().decode()
-            except urllib.error.HTTPError as e:
-                return e.code, e.read().decode()
-
-        status, msg = await self.phase("enable", asyncio.to_thread(call), model=model)
-        if status == 200:
-            self.enabled.append(model)
-        return status, msg
-
-    # -- act 5: update -------------------------------------------------------
+    # -- update -------------------------------------------------------
 
     async def update(self):
         """Replacement: stop, pull the new version, start, let the app reload."""
@@ -418,10 +428,11 @@ def base_ready():
 async def prepare_base(lane_dir, emit, dev):
     """Build the lane runtime once and publish it in the three base formats."""
     plain, esgz, zstd = base_ref("plain"), base_ref("esgz"), base_ref("zstd")
-    emit("prepare", step=f"runtime image ({dev})")
+    flavor = "cuda" if dev == "cuda" else "cpu"
+    emit("prepare", step=f"runtime image ({flavor})")
     await sh("buildctl", "build", "--frontend", "dockerfile.v0",
              "--local", f"context={lane_dir}", "--local", f"dockerfile={lane_dir}",
-             "--opt", f"build-arg:DEVICE={dev}",
+             "--opt", f"build-arg:DEVICE={flavor}",
              # The registry expands 2DFS fields only on OCI manifests.
              "--output", f"type=image,name={plain},push=true,registry.insecure=true,"
                          "oci-mediatypes=true")

@@ -45,6 +45,7 @@ def asset_path(name, spec):
 
 
 def sha256(path):
+    """Digest of an asset, cached in a sidecar file next to it."""
     side = path + ".sha256"
     if os.path.exists(side) and os.path.getmtime(side) >= os.path.getmtime(path):
         return open(side).read().strip()
@@ -142,19 +143,28 @@ def materialize(scn, version):
         if slot == "config":
             continue
         spec = version_specs(scn, version)[slot]
-        dest = os.path.join(base, slot, spec["file"])
+        digests, size = [], 0
         if spec.get("placeholder"):
             # A slot reserved for a model a later version ships, so the image
-            # keeps the same layout across versions.
-            with open(dest, "w") as f:
-                f.write(f"{slot}: not shipped in {version}\n")
-            src = dest
+            # keeps the same files across versions.
+            for name in filter(None, (spec["file"], spec.get("decoder_file"))):
+                text = f"{slot}: not shipped in {version}\n"
+                with open(os.path.join(base, slot, name), "w") as f:
+                    f.write(text)
+                digests.append(hashlib.sha256(text.encode()).hexdigest())
+                size += len(text)
         else:
-            src = asset_path(spec["asset"], scn["assets"][spec["asset"]])
-            os.link(src, dest)
-        models[slot] = {k: v for k, v in spec.items() if k not in ("asset", "placeholder")}
-        models[slot]["sha256"] = sha256(src)
-        models[slot]["bytes"] = os.path.getsize(src)
+            for key, name in (("asset", "file"), ("decoder_asset", "decoder_file")):
+                if spec.get(key):
+                    src = asset_path(spec[key], scn["assets"][spec[key]])
+                    os.link(src, os.path.join(base, slot, spec[name]))
+                    digests.append(sha256(src))
+                    size += os.path.getsize(src)
+        models[slot] = {k: v for k, v in spec.items()
+                        if k not in ("asset", "decoder_asset", "placeholder")}
+        # one digest for all of the slot's files, so a change to any reloads the model
+        models[slot]["sha256"] = hashlib.sha256("".join(digests).encode()).hexdigest()
+        models[slot]["bytes"] = size
     config = {"scenario": scn["name"], "version": version, "models": models}
     with open(os.path.join(base, "config", "config.json"), "w") as f:
         json.dump(config, f, indent=2, sort_keys=True)

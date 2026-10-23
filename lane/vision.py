@@ -1,6 +1,8 @@
 """Model wrappers used by the lane app. Each wrapper loads one ONNX file and
 turns a BGR frame into drawable results."""
 
+import io
+import json
 import os
 import time
 
@@ -22,21 +24,6 @@ COCO = [
     "toothbrush",
 ]
 
-# torchvision's COCO category list (91 ids, with gaps)
-TV_COCO = [
-    "__background__", "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train",
-    "truck", "boat", "traffic light", "fire hydrant", "N/A", "stop sign", "parking meter",
-    "bench", "bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra",
-    "giraffe", "N/A", "backpack", "umbrella", "N/A", "N/A", "handbag", "tie", "suitcase",
-    "frisbee", "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove",
-    "skateboard", "surfboard", "tennis racket", "bottle", "N/A", "wine glass", "cup", "fork",
-    "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange", "broccoli", "carrot",
-    "hot dog", "pizza", "donut", "cake", "chair", "couch", "potted plant", "bed", "N/A",
-    "dining table", "N/A", "N/A", "toilet", "N/A", "tv", "laptop", "mouse", "remote",
-    "keyboard", "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", "N/A",
-    "book", "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush",
-]
-
 VOC = [
     "background", "aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat",
     "chair", "cow", "diningtable", "dog", "horse", "motorbike", "person", "pottedplant",
@@ -44,13 +31,63 @@ VOC = [
 ]
 
 
+class RemoteSession:
+    """An ONNX Runtime session on the Apple GPU helper (tools/accel). The model
+    is still read from this container's mount; only its bytes and the per-frame
+    tensors travel to the helper. Large float inputs go as float16."""
+
+    class Arg:
+        def __init__(self, d):
+            self.name, self.shape, self.type = d["name"], d["shape"], d["type"]
+
+    def __init__(self, path, url):
+        import http.client
+        import urllib.parse
+        with open(path, "rb") as f:
+            data = f.read()
+        u = urllib.parse.urlparse(url)
+        self.connect = lambda: http.client.HTTPConnection(u.hostname, u.port, timeout=300)
+        self.conn = self.connect()
+        info = json.loads(self.request("/models", data))
+        self.digest, self.provider = info["digest"], info["provider"]
+        self.inputs = [self.Arg(i) for i in info["inputs"]]
+
+    def get_inputs(self):
+        return self.inputs
+
+    def run(self, _names, feeds):
+        buf = io.BytesIO()
+        np.savez(buf, **{k: v.astype(np.float16) if v.dtype == np.float32 and v.size > 65536 else v
+                         for k, v in feeds.items()})
+        with np.load(io.BytesIO(self.request(f"/run/{self.digest}", buf.getvalue()))) as z:
+            return [z[f"arr_{i}"] for i in range(len(z.files))]
+
+    def request(self, path, body):
+        """POST with one reconnect: the helper may drop an idle keep-alive."""
+        import http.client
+        for attempt in (0, 1):
+            try:
+                self.conn.request("POST", path, body=body)
+                resp = self.conn.getresponse()
+                if resp.status != 200:
+                    raise RuntimeError(f"accel {path}: HTTP {resp.status}")
+                return resp.read()
+            except (OSError, http.client.HTTPException):
+                self.conn.close()
+                self.conn = self.connect()
+                if attempt:
+                    raise
+
+
 def session(path, threads):
+    if os.environ.get("DEVICE") == "apple":
+        return RemoteSession(path, os.environ["ACCEL_URL"])
     opts = ort.SessionOptions()
     opts.intra_op_num_threads = threads
     opts.inter_op_num_threads = 1
     opts.log_severity_level = 3   # exported detection graphs warn about dynamic shapes
     wanted = ["CPUExecutionProvider"]
-    if os.environ.get("DEVICE") == "gpu":
+    if os.environ.get("DEVICE") == "cuda":
         wanted.insert(0, "CUDAExecutionProvider")
     providers = [p for p in wanted if p in ort.get_available_providers()]
     return ort.InferenceSession(path, opts, providers=providers)
@@ -126,37 +163,45 @@ class VocSegmenter:
         return cv2.resize(labels, (w, h), interpolation=cv2.INTER_NEAREST)
 
 
-class InstanceSegmenter:
-    """Mask R-CNN v2 (torchvision, exported to ONNX for a 960x540 frame).
-    Returns one mask per object, cropped to its box, so the lane can draw it
-    into the matching box of a newer frame."""
+class BoxSegmenter:
+    """MobileSAM, prompted with the detector's boxes: one mask per detected
+    object. The encoder and decoder have fixed input shapes, so they run fully
+    on CoreML or CUDA. The decoder file sits next to the encoder."""
+
+    W, H = 1024, 576   # encoder input: the 16:9 frame scaled to SAM's 1024 px
 
     def __init__(self, path, spec, threads):
-        self.sess = session(path, threads)
-        self.score = float(spec.get("score", 0.6))
+        self.enc = session(path, threads)
+        self.dec = session(os.path.join(os.path.dirname(path), spec["decoder_file"]), threads)
         self.classes = set(spec["classes"])
-        self.input = self.sess.get_inputs()[0].name
-        self.size = (960, 540)
+        self.limit = int(spec.get("max_objects", 16))
 
-    def __call__(self, frame):
+    def __call__(self, payload):
+        frame, dets = payload
         h, w = frame.shape[:2]
-        img = cv2.resize(frame, self.size) if (w, h) != self.size else frame
-        blob = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).transpose(2, 0, 1).astype(np.float32) / 255
-        boxes, labels, scores, masks = self.sess.run(None, {self.input: blob})
-        sx, sy = w / self.size[0], h / self.size[1]
+        targets = [d for d in dets if d["name"] in self.classes]
+        targets = sorted(targets, key=lambda d: -d["box"][2] * d["box"][3])[: self.limit]
+        if not targets:
+            return []
+        img = cv2.cvtColor(cv2.resize(frame, (self.W, self.H)), cv2.COLOR_BGR2RGB)
+        emb = self.enc.run(None, {"input_image": img.astype(np.float32)})[0]
+        sx, sy = self.W / w, self.H / h
         out = []
-        for box, label, score, mask in zip(boxes, labels, scores, masks):
-            name = TV_COCO[int(label)]
-            if score < self.score or name not in self.classes:
-                continue
-            x1, y1, x2, y2 = box
-            xi1, yi1, xi2, yi2 = int(x1), int(y1), int(np.ceil(x2)), int(np.ceil(y2))
-            crop = mask[0, yi1:yi2, xi1:xi2] > 0.5
-            if crop.size == 0:
-                continue
-            out.append({"name": name, "box": np.array([x1 * sx, y1 * sy, (x2 - x1) * sx,
-                                                       (y2 - y1) * sy]),
-                        "mask": crop.astype(np.uint8)})
+        for d in targets:
+            x, y, bw, bh = d["box"]
+            corners = np.array([[[x * sx, y * sy], [(x + bw) * sx, (y + bh) * sy]]], np.float32)
+            mask = self.dec.run(None, {
+                "image_embeddings": emb, "point_coords": corners,
+                "point_labels": np.array([[2, 3]], np.float32),   # box corners
+                "mask_input": np.zeros((1, 1, 256, 256), np.float32),
+                "has_mask_input": np.zeros(1, np.float32),
+                "orig_im_size": np.array([h, w], np.float32)})[0][0, 0]
+            x0, y0 = max(0, int(x)), max(0, int(y))
+            crop = mask[y0:int(np.ceil(y + bh)), x0:int(np.ceil(x + bw))] > 0
+            if crop.any():
+                out.append({"name": d["name"], "box": np.array([x0, y0, crop.shape[1], crop.shape[0]],
+                                                                np.float32),
+                            "mask": crop.astype(np.uint8)})
         return out
 
 
@@ -296,7 +341,7 @@ class Pose:
 
 KINDS = {"yolox": YoloxDetector, "voc-seg": VocSegmenter, "imagenet-cls": Classifier,
          "yunet": FaceDetector, "ferplus": Expression, "rtmpose": Pose,
-         "maskrcnn": InstanceSegmenter}
+         "boxsam": BoxSegmenter}
 
 # COCO keypoint pairs drawn as a skeleton
 SKELETON = [(5, 7), (7, 9), (6, 8), (8, 10), (5, 6), (5, 11), (6, 12), (11, 12),

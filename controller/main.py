@@ -4,8 +4,8 @@ relay between the frame source, the lane apps and the browser.
 Public API (dashboard):
     GET  /api/info                       backend, scenarios, methods, settings
     POST /api/settings                   scenario, lanes, link_mbit, cpus, ...
-    POST /api/acts/{act}                 prepare | build-v1 | deploy | enable |
-                                         build-v2 | update | patch | reset
+    POST /api/acts/{act}                 prepare | build-v1 | deploy | add-model |
+                                         build-v3 | rollout-v3 | patch | reset
     GET  /api/events                     server-sent events
     GET  /api/trace                      recorded events of the current run
     GET  /api/video                      WebSocket: every lane's annotated frames,
@@ -41,7 +41,7 @@ from bus import Bus
 DASHBOARD = os.environ.get("DEMO_DASHBOARD", "/opt/demo/dashboard")
 LANE_DIR = os.environ.get("DEMO_LANE", "/opt/demo/lane")
 TOKEN = os.environ.get("DEMO_TOKEN", "")
-ACTS = ["prepare", "build-v1", "deploy", "enable", "build-v2", "update", "patch", "reset"]
+ACTS = ["prepare", "build-v1", "deploy", "add-model", "build-v3", "rollout-v3", "patch", "reset"]
 
 
 class Session:
@@ -158,42 +158,40 @@ class Session:
             await self.wait_for(m, "first frame", lambda meta: True, since)
         await self.each(deploy)
 
-    async def act_enable(self):
-        model = self.settings["scn"].get("enable", "segmenter")
-        since = time.monotonic()
+    async def rollout(self, version, build=False):
+        """Roll version out on every lane: replacement lanes restart, MitraFSnap
+        refreshes in place. The act ends when each lane's frames show the
+        version with every model it turns on."""
+        specs = scenario.version_specs(self.settings["scn"], version)
+        turned_on = [k for k, v in specs.items() if v.get("enabled")]
 
-        async def enable(m):
-            status, msg = await m.enable(model)
-            if status == 409 and m.partial and not m.lazy:
-                # 2DFS pulled only the selected allotments: redeploy with a wider selection.
-                m.emit("redeploy", reason=msg)
-                await m.stop()
-                await m.deploy(sorted(set(m.selected) | {model}), m.enabled + [model])
-            await self.wait_for(m, f"{model} output",
-                                lambda meta: model in meta.get("models", []), since)
-        await self.each(enable)
+        def live(meta):
+            return meta.get("version") == version and set(turned_on) <= set(meta.get("models", []))
 
-    async def act_build_v2(self):
-        await self.each(lambda m: m.build("v2"))
-
-    async def act_update(self):
-        since = time.monotonic()
-
-        async def update(m):
+        async def one(m):
+            if build:
+                await m.build(version)
+            for model in turned_on:   # 2DFS must now select their allotments too
+                if model not in m.enabled:
+                    m.enabled.append(model)
+            since = time.monotonic()
+            m.emit("rollout", version=version, act=self.act)
             await m.update()
-            await self.wait_for(m, "v2 live", lambda meta: meta.get("version") == "v2", since)
-        await self.each(update)
+            await self.wait_for(m, f"{version} live", live, since)
+        await self.each(one)
+
+    async def act_add_model(self):
+        await self.rollout("v2", build=True)
+
+    async def act_build_v3(self):
+        await self.each(lambda m: m.build("v3"))
+
+    async def act_rollout_v3(self):
+        await self.rollout("v3")
 
     async def act_patch(self):
-        """Build v3, which only changes a model this camera never loads, and roll
-        it out right away."""
-        async def patch(m):
-            await m.build("v3")
-            since = time.monotonic()
-            m.emit("rollout", version="v3")
-            await m.update()
-            await self.wait_for(m, "v3 live", lambda meta: meta.get("version") == "v3", since)
-        await self.each(patch)
+        """v4 only changes a model this camera never loads."""
+        await self.rollout("v4", build=True)
 
     async def act_reset(self):
         await asyncio.gather(*(m.clean() for m in self.methods.values()))
@@ -294,11 +292,11 @@ async def info(request):
     return web.json_response({
         "backend": {"arch": platform.machine(), "kernel": platform.release(),
                     "cpus": os.cpu_count(), "token": bool(TOKEN),
-                    "gpu": methods.gpu_available()},
+                    "accelerators": methods.accelerators()},
         "scenarios": scenario.available(),
         "scenario": {k: scn[k] for k in ("name", "title", "description", "slots",
                                          "docker_order", "select")} | {
-            "frames": scn["frames"]["kind"], "enable": scn.get("enable", "segmenter"),
+            "frames": scn["frames"]["kind"], "add": scn["add"],
             "acts": scn.get("acts", {}),
             "versions": {v: {slot: spec.get("label", "")
                              for slot, spec in scenario.version_specs(scn, v).items()}

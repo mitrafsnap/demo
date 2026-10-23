@@ -2,3 +2,5 @@ compose.override.yaml
 __pycache__/
 .venv/
 /work/
+docs/full/
+.DS_Store

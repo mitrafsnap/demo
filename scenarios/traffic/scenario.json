@@ -1,7 +1,7 @@
 {
   "name": "traffic",
   "title": "Traffic camera",
-  "description": "A city camera at a busy crossing. v2 ships a stronger detector that also recognizes bicycles, motorcycles, buses, trucks and streetcars. v3 patches a large model this camera never uses.",
+  "description": "A city camera at a busy crossing. v1 detects people and cars; v2 adds instance segmentation; v3 ships a stronger detector that also recognizes bicycles, buses and trucks; v4 patches a large model this camera never uses.",
   "frames": {
     "kind": "file",
     "asset": "clip",
@@ -57,10 +57,15 @@
       "license": "Apache-2.0, ONNX Model Zoo",
       "credit": "VGG-16-BN"
     },
-    "maskrcnn_v2": {
-      "export": "maskrcnn_v2",
-      "license": "BSD-3-Clause (torchvision); COCO-trained weights",
-      "credit": "Mask R-CNN ResNet-50 FPN v2, torchvision"
+    "mobilesam_encoder": {
+      "export": "mobilesam_encoder",
+      "license": "Apache-2.0 (MobileSAM); MIT (ONNX export by Acly)",
+      "credit": "MobileSAM image encoder"
+    },
+    "mobilesam_decoder": {
+      "export": "mobilesam_decoder",
+      "license": "Apache-2.0 (MobileSAM); MIT (ONNX export by Acly)",
+      "credit": "MobileSAM mask decoder"
     }
   },
   "versions": {
@@ -78,9 +83,10 @@
         "label": "YOLOX-Tiny: people, cars"
       },
       "segmenter": {
-        "asset": "maskrcnn_v2",
+        "placeholder": true,
         "file": "segmenter.onnx",
-        "kind": "maskrcnn",
+        "decoder_file": "segmenter-decoder.onnx",
+        "kind": "boxsam",
         "classes": [
           "person",
           "bicycle",
@@ -90,7 +96,7 @@
           "truck",
           "train"
         ],
-        "label": "Mask R-CNN v2 instance segmentation"
+        "label": "segmenter: not shipped yet"
       },
       "classifier": {
         "asset": "resnet152",
@@ -106,6 +112,26 @@
       }
     },
     "v2": {
+      "segmenter": {
+        "asset": "mobilesam_encoder",
+        "file": "segmenter.onnx",
+        "decoder_asset": "mobilesam_decoder",
+        "decoder_file": "segmenter-decoder.onnx",
+        "kind": "boxsam",
+        "classes": [
+          "person",
+          "bicycle",
+          "car",
+          "motorcycle",
+          "bus",
+          "truck",
+          "train"
+        ],
+        "enabled": true,
+        "label": "MobileSAM instance masks for detected objects"
+      }
+    },
+    "v3": {
       "detector": {
         "asset": "yolox_s",
         "file": "detector.onnx",
@@ -124,7 +150,7 @@
         "label": "YOLOX-S: + bicycles, motorcycles, buses, trucks, streetcars"
       }
     },
-    "v3": {
+    "v4": {
       "aux": {
         "asset": "vgg16_bn",
         "file": "aux.onnx",
@@ -132,5 +158,6 @@
         "label": "VGG-16-BN classifier, patched (unused by this camera)"
       }
     }
-  }
+  },
+  "add": "segmenter"
 }

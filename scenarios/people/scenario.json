@@ -1,7 +1,7 @@
 {
   "name": "people",
   "title": "People camera (webcam)",
-  "description": "A camera that watches people. v1 finds faces; v2 ships an expression model that recognizes smiles. Act 3 turns on body pose. v3 patches a large model this camera never uses.",
+  "description": "A camera that watches people. v1 finds faces; v2 adds body pose; v3 ships an expression model that recognizes smiles; v4 patches a large model this camera never uses.",
   "frames": {
     "kind": "camera",
     "fps": 10,
@@ -32,20 +32,19 @@
     "face",
     "config"
   ],
-  "enable": "pose",
   "acts": {
-    "enable": {
-      "title": "Enable pose",
-      "what": "a model the camera didn't fetch",
-      "narration": "Turning on body pose, a model the camera did not fetch. Lazy methods fetch it on first use; 2DFS has to redeploy with a wider selection."
+    "add-model": {
+      "title": "Add pose",
+      "what": "v2: build + roll out",
+      "narration": "v2 ships body pose, a model the first image did not contain. Every method rebuilds and rolls it out; MitraFSnap refreshes the running container and fetches the model when the app opens it."
     },
-    "build-v2": {
-      "title": "Build v2",
+    "build-v3": {
+      "title": "Build v3",
       "what": "new expression model",
-      "narration": "v2 ships an expression model that recognizes smiles. Only the changed parts are rebuilt."
+      "narration": "v3 ships an expression model that recognizes smiles. Only the changed parts are rebuilt."
     },
-    "update": {
-      "narration": "Rolling out v2. Docker, eStargz and 2DFS stop, pull and restart. MitraFSnap refreshes the running container's files in place, and smiles start being labeled while it keeps serving."
+    "rollout-v3": {
+      "narration": "Rolling out v3. Docker, eStargz and 2DFS stop, pull and restart. MitraFSnap refreshes the running container's files in place, and smiles start being labeled while it keeps serving."
     }
   },
   "assets": {
@@ -102,10 +101,10 @@
         "label": "expression: not shipped yet"
       },
       "pose": {
-        "asset": "rtmpose",
+        "placeholder": true,
         "file": "pose.onnx",
         "kind": "rtmpose",
-        "label": "RTMPose-m body keypoints"
+        "label": "pose: not shipped yet"
       },
       "classifier": {
         "asset": "resnet152",
@@ -121,6 +120,15 @@
       }
     },
     "v2": {
+      "pose": {
+        "asset": "rtmpose",
+        "file": "pose.onnx",
+        "kind": "rtmpose",
+        "label": "RTMPose-m body keypoints",
+        "enabled": true
+      }
+    },
+    "v3": {
       "expression": {
         "asset": "ferplus",
         "file": "expression.onnx",
@@ -129,7 +137,7 @@
         "label": "FER+ expressions: happy, surprised, neutral, ..."
       }
     },
-    "v3": {
+    "v4": {
       "aux": {
         "asset": "vgg16_bn",
         "file": "aux.onnx",
@@ -137,5 +145,6 @@
         "label": "VGG-16-BN classifier, patched (unused by this camera)"
       }
     }
-  }
+  },
+  "add": "pose"
 }

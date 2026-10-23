@@ -32,7 +32,7 @@ CONFIG = os.path.join(MODELS, "config.json")
 # per-detection models on each detected box, async models in the background on
 # the latest frame (their last result is drawn until the next one is ready).
 ROLES = {"yolox": "detect", "yunet": "detect", "ferplus": "per-detection",
-         "voc-seg": "async", "maskrcnn": "async", "rtmpose": "async", "imagenet-cls": "async"}
+         "voc-seg": "async", "boxsam": "async", "rtmpose": "async", "imagenet-cls": "async"}
 
 
 def role(spec):
@@ -164,7 +164,8 @@ class Lane:
             frame, dets = latest
             for name, (worker, _) in jobs:
                 kind = self.config["models"][name]["kind"]
-                payload = (frame, [d["box"] for d in dets]) if kind == "rtmpose" else frame
+                payload = {"rtmpose": (frame, [d["box"] for d in dets]),
+                           "boxsam": (frame, dets)}.get(kind, frame)
                 try:
                     self.results[name] = worker(payload)
                 except (OSError, EOFError):
@@ -192,7 +193,7 @@ class Lane:
             kind = specs[name]["kind"]
             if kind == "voc-seg":
                 overlays["mask"] = (result, specs[name].get("classes", []))
-            elif kind == "maskrcnn":
+            elif kind == "boxsam":
                 overlays["instances"] = vision.place_instances(dets, result)
             elif kind == "rtmpose":
                 overlays["pose"] = result
