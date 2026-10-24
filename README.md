@@ -78,8 +78,10 @@ All numbers on the dashboard come from the same event times. The definitions are
 - The total build and push time sums the build and push of every version.
 - The download counts the bytes a lane pulled over the emulated link.
 
-We ran the traffic scenario on a MacBook Pro (M4 Pro, 14 CPUs) with the Apple GPU helper and a
-200 Mbit/s emulated link, with all four methods at once.
+We ran the traffic scenario with all four methods at once on a MacBook Pro with an Apple M4 Pro
+(10 performance and 4 efficiency cores, 20 GPU cores, 48 GB of memory) and macOS 26.6. The
+backend ran in Docker Desktop 29.1, whose Linux VM had 14 CPUs and 8 GB of memory, the models
+ran on the Apple GPU through the helper, and the emulated link was set to 200 Mbit/s.
 
 | | Docker | eStargz | 2DFS | MitraFSnap |
 |---|---:|---:|---:|---:|
