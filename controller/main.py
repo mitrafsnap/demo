@@ -4,8 +4,8 @@ relay between the frame source, the lane apps and the browser.
 Public API (dashboard):
     GET  /api/info                       backend, scenarios, methods, settings
     POST /api/settings                   scenario, lanes, link_mbit, cpus, ...
-    POST /api/acts/{act}                 prepare | build-v1 | deploy | add-model |
-                                         build-v3 | rollout-v3 | patch | reset
+    POST /api/acts/{act}                 deploy | add-model | upgrade | patch |
+                                         reset | prepare
     GET  /api/events                     server-sent events
     GET  /api/trace                      recorded events of the current run
     GET  /api/video                      WebSocket: every lane's annotated frames,
@@ -30,6 +30,7 @@ import traceback
 
 import cv2
 import numpy as np
+import aiohttp
 from aiohttp import web, WSMsgType
 
 import frames
@@ -41,7 +42,7 @@ from bus import Bus
 DASHBOARD = os.environ.get("DEMO_DASHBOARD", "/opt/demo/dashboard")
 LANE_DIR = os.environ.get("DEMO_LANE", "/opt/demo/lane")
 TOKEN = os.environ.get("DEMO_TOKEN", "")
-ACTS = ["prepare", "build-v1", "deploy", "add-model", "build-v3", "rollout-v3", "patch", "reset"]
+ACTS = ["deploy", "add-model", "upgrade", "patch", "reset", "prepare"]
 
 
 class Session:
@@ -52,7 +53,9 @@ class Session:
         self.settings = {"scenario": "traffic", "lanes": ["docker", "mitrafsnap"],
                          "mode": "live", "link_mbit": 200, "cpus": 2, "threads": 2,
                          "watch_interval": "1s", "auto_watch": False, "cold_build": True,
-                         "device": "auto"}
+                         "device": "auto",
+                         # other machines: "" means this one
+                         "registry": "", "builder": "", "builder_token": ""}
         self.settings["scn"] = scenario.load(self.settings["scenario"])
         self.methods = {M.key: M(i, self.bus, self.link, self.settings)
                         for i, M in enumerate(methods.METHODS)}
@@ -65,6 +68,7 @@ class Session:
         self.prepared = False
 
     async def start(self):
+        await methods.set_registry("")   # writes BuildKit's config and starts it
         for i, key in enumerate(self.methods):
             await self.link.add(key, 5101 + i)
         self.source.start()
@@ -73,7 +77,8 @@ class Session:
         asyncio.create_task(self.run_act("reset"))
 
     def public_settings(self):
-        return {k: v for k, v in self.settings.items() if k != "scn"}
+        """Settings safe to show anyone who can reach the dashboard."""
+        return {k: v for k, v in self.settings.items() if k not in ("scn", "builder_token")}
 
     def lanes(self):
         return [self.methods[k] for k in self.settings["lanes"]]
@@ -82,6 +87,9 @@ class Session:
 
     async def run_act(self, name):
         self.act = name
+        if name == "deploy" and (self.done - {"prepare"} or
+                                 any(m.deployed for m in self.methods.values())):
+            await self.act_reset()   # Act 1 starts cold, with a fresh clock and trace
         self.bus.emit("act", act=name, state="start", lanes=self.settings["lanes"])
         t0 = time.monotonic()
         try:
@@ -111,25 +119,35 @@ class Session:
     async def wait_for(self, m, what, pred, since, timeout=900):
         """Wait until the lane's app produces a frame matching pred, so an act
         ends when the audience can see its effect, not when commands return."""
-        t0 = time.monotonic()
+        t0 = checked = time.monotonic()
         while time.monotonic() - t0 < timeout:
             latest = self.latest.get(m.key)
             if latest and latest[3] >= since and pred(latest[2]):
                 m.emit("ready", what=what, seconds=round(latest[3] - since, 3))
                 return
+            if time.monotonic() - checked > 3:   # fail fast if the lane's app died
+                checked = time.monotonic()
+                alive, log = await m.running()
+                if not alive:
+                    raise RuntimeError(f"{m.title}: the lane's container exited:\n{log}")
             await asyncio.sleep(0.05)
         raise TimeoutError(f"{m.title}: no {what} after {timeout}s")
 
     async def act_prepare(self):
         scn = self.settings["scn"]
-        await scenario.fetch_assets(scn, self.bus.emit)
         dev = methods.device(self.settings["device"])
         self.settings["effective_device"] = dev
         methods.BASE_TAG = methods.base_tag(dev)
-        if not await asyncio.to_thread(methods.base_ready):
-            await methods.prepare_base(LANE_DIR, self.bus.emit, dev)
-        for v in scn["versions"]:
-            scenario.materialize(scn, v)
+        methods.APPLE_URL = await asyncio.to_thread(methods.apple_url) if dev == "apple" else None
+        if dev == "apple" and not methods.APPLE_URL:
+            raise RuntimeError("the Apple GPU helper stopped answering; restart tools/accel/run.sh")
+        # the builder machine: models, base images, build inputs
+        if self.settings["builder"]:
+            await self.builder_call("prepare", flavor=dev)
+        else:
+            await prepare_builder(scn, dev, self.bus.emit)
+        # this machine: the camera clip, and the models the Apple GPU helper compiles
+        await scenario.fetch_assets(scn, self.bus.emit, scenario.app_assets(scn, dev == "apple"))
         src = scn["frames"]
         # A camera scenario plays its fallback clip until a browser sends webcam frames.
         clip = src if src["kind"] == "file" else src.get("fallback")
@@ -139,24 +157,37 @@ class Session:
             decoded = await asyncio.to_thread(frames.decode_clip, path, src["fps"], src["width"],
                                               clip.get("start", 0), clip.get("end"))
             self.source.load_clip(decoded, src["fps"])
+        if dev == "apple":
+            # Compile every model once, so no lane's first load pays CoreML's
+            # compile time and the comparison measures the methods, not it.
+            self.bus.emit("prepare", step="warm the Apple GPU helper")
+            await asyncio.to_thread(methods.warm_apple, scn)
         self.prepared = True
-        self.bus.emit("prepare", step="ready", sizes={v: scenario.slot_sizes(scn, v)
-                                                     for v in scn["versions"]})
+        self.bus.emit("prepare", step="ready")
 
-    async def act_build_v1(self):
-        if self.settings["cold_build"]:
-            await self.each(lambda m: m.clean_build_cache())
-        await self.each(lambda m: m.build("v1"))
+    async def builder_call(self, action, **body):
+        """Run a prepare step on the builder machine, relaying its events."""
+        m = next(iter(self.methods.values()))
+        m.relay = lambda kind, data: self.bus.emit(kind, **data)
+        try:
+            await m.on_builder(action, **body)
+        finally:
+            m.relay = None
 
     async def act_deploy(self):
+        """Act 1: prepare, build v1 and deploy it (run_act reset the lanes first)."""
+        await self.act_prepare()
+        if self.settings["cold_build"]:
+            await self.each(lambda m: m.clean_build_cache())
         scn = self.settings["scn"]
         enabled = [s for s in scn["select"] if s != "config"]
-        since = time.monotonic()
 
-        async def deploy(m):
+        async def one(m):
+            await m.build("v1")
+            since = time.monotonic()
             await m.deploy(scn["select"], enabled)
             await self.wait_for(m, "first frame", lambda meta: True, since)
-        await self.each(deploy)
+        await self.each(one)
 
     async def rollout(self, version, build=False):
         """Roll version out on every lane: replacement lanes restart, MitraFSnap
@@ -183,11 +214,8 @@ class Session:
     async def act_add_model(self):
         await self.rollout("v2", build=True)
 
-    async def act_build_v3(self):
-        await self.each(lambda m: m.build("v3"))
-
-    async def act_rollout_v3(self):
-        await self.rollout("v3")
+    async def act_upgrade(self):
+        await self.rollout("v3", build=True)
 
     async def act_patch(self):
         """v4 only changes a model this camera never loads."""
@@ -231,7 +259,18 @@ class Session:
             self.bus.emit("stats", source_seq=self.source.seq, lanes=stats)
             if now - last_sample >= 1:
                 last_sample = now
-                self.bus.trace.append({"t": self.bus.now(), "kind": "sample", "lanes": stats})
+                self.bus.trace.append({"t": self.bus.now(), "kind": "sample",
+                                       "source_seq": self.source.seq, "lanes": stats})
+
+
+async def prepare_builder(scn, dev, emit):
+    """What a builder needs for a scenario: every asset, the lane runtime in
+    its three base formats for dev, and each version's build inputs."""
+    await scenario.fetch_assets(scn, emit)
+    if not await asyncio.to_thread(methods.base_ready):
+        await methods.prepare_base(LANE_DIR, emit, dev)
+    for v in scn["versions"]:
+        scenario.materialize(scn, v)
 
 
 session = None
@@ -296,8 +335,8 @@ async def info(request):
         "scenarios": scenario.available(),
         "scenario": {k: scn[k] for k in ("name", "title", "description", "slots",
                                          "docker_order", "select")} | {
-            "frames": scn["frames"]["kind"], "add": scn["add"],
-            "acts": scn.get("acts", {}),
+            "frames": scn["frames"]["kind"], "fps": scn["frames"]["fps"], "add": scn["add"],
+            "words": scn.get("words", {}),
             "versions": {v: {slot: spec.get("label", "")
                              for slot, spec in scenario.version_specs(scn, v).items()}
                          for v in scn["versions"]},
@@ -306,6 +345,7 @@ async def info(request):
         "methods": [{"key": m.key, "title": m.title, "lazy": m.lazy, "partial": m.partial,
                      "refresh": m.refresh} for m in s.methods.values()],
         "settings": s.public_settings(),
+        "link": {"emulated": methods.registry_local(), "registry": methods.REGISTRY},
         "acts": ACTS, "done": sorted(s.done), "running": s.act, "prepared": s.prepared,
     })
 
@@ -322,8 +362,23 @@ async def settings(request):
             return web.json_response({"error": str(e)}, status=400)
         if dev != s.settings.get("effective_device"):
             s.prepared = False   # the lane runtime has to be rebuilt for the device
+    if "registry" in body and body["registry"] != s.settings["registry"]:
+        host = body["registry"].strip().removeprefix("http://").rstrip("/")
+        if host and not await reachable(f"http://{host}/v2/"):
+            return web.json_response({"error": f"no registry answers at {host}"}, status=400)
+        await methods.set_registry(host)
+        name, port = methods.REGISTRY.rsplit(":", 1)
+        s.link.upstream = (name, int(port))
+        body["registry"] = host
+        s.prepared = False   # base images live in the registry
+    if "builder" in body and body["builder"] != s.settings["builder"]:
+        url = body["builder"].strip().rstrip("/")
+        if url and not await reachable(f"{url}/api/builder/health", body.get("builder_token")):
+            return web.json_response({"error": f"no demo backend answers at {url}"}, status=400)
+        body["builder"] = url
+        s.prepared = False
     allowed = {"scenario", "lanes", "link_mbit", "cpus", "threads", "watch_interval",
-               "auto_watch", "cold_build", "mode", "device"}
+               "auto_watch", "cold_build", "mode", "device", "registry", "builder", "builder_token"}
     for k, v in body.items():
         if k in allowed:
             s.settings[k] = v
@@ -333,7 +388,9 @@ async def settings(request):
         asyncio.create_task(s.run_act("reset"))   # the old scenario's lanes go away
     if "lanes" in body:
         s.settings["lanes"] = [k for k in s.methods if k in body["lanes"]]
-    s.link.bucket.set_rate(s.settings["link_mbit"] or None)
+    # emulate the edge link only when the registry is on this machine; otherwise
+    # the real network between the machines is the link
+    s.link.bucket.set_rate((s.settings["link_mbit"] or None) if methods.registry_local() else None)
     s.bus.emit("settings", settings=s.public_settings())
     return web.json_response(s.public_settings())
 
@@ -345,8 +402,8 @@ async def act(request):
         return web.json_response({"error": f"unknown act {name}"}, status=404)
     if s.act:
         return web.json_response({"error": f"act {s.act} is running"}, status=409)
-    if name not in ("prepare", "reset") and not s.prepared:
-        return web.json_response({"error": "run prepare first"}, status=409)
+    if name not in ("prepare", "reset", "deploy") and not s.prepared:
+        return web.json_response({"error": "run Act 1 (Deploy v1) first"}, status=409)
     asyncio.create_task(s.run_act(name))
     return web.json_response({"act": name, "state": "started"}, status=202)
 
@@ -404,7 +461,7 @@ async def lane_video(request):
 async def video_ws(request):
     """All lanes over one WebSocket. Browsers cap HTTP/1.1 connections per host
     at six, so one MJPEG stream per lane stalls once four lanes are shown."""
-    ws = web.WebSocketResponse(heartbeat=20)
+    ws = web.WebSocketResponse()
     await ws.prepare(request)
     keys = list(session.methods)
     sent = {k: None for k in keys}
@@ -447,6 +504,85 @@ async def camera(request):
         session.source.mode = "clip"
         session.bus.emit("source", mode="clip")
     return ws
+
+
+async def reachable(url, token=None):
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    try:
+        timeout = aiohttp.ClientTimeout(total=5)
+        async with aiohttp.ClientSession(timeout=timeout) as http:
+            async with http.get(url, headers=headers) as resp:
+                return resp.status < 500
+    except (aiohttp.ClientError, asyncio.TimeoutError):
+        return False
+
+
+# -- builder API: this backend building for an app backend on another machine --------
+
+async def builder_health(request):
+    return web.json_response({"ok": True, "arch": platform.machine()})
+
+
+async def builder_stream(request, work):
+    """Run work(emit) and stream every event it emits as one JSON line."""
+    resp = web.StreamResponse(headers={"Content-Type": "application/x-ndjson"})
+    await resp.prepare(request)
+    queue = asyncio.Queue()
+
+    def emit(kind, data):
+        data = {k: v for k, v in data.items() if k not in ("t", "lane")}
+        queue.put_nowait(json.dumps({"kind": kind, **data}) + "\n")
+
+    async def run():
+        try:
+            await work(emit)
+            queue.put_nowait(json.dumps({"kind": "done"}) + "\n")
+        except Exception as e:
+            traceback.print_exc()
+            queue.put_nowait(json.dumps({"kind": "failed", "error": str(e)[-800:]}) + "\n")
+        queue.put_nowait(None)
+
+    task = asyncio.create_task(run())
+    while (line := await queue.get()) is not None:
+        await resp.write(line.encode())
+    await task
+    return resp
+
+
+async def builder_request(request):
+    """The scenario and method of a builder request, as a fresh Method that
+    doesn't touch this backend's own lanes."""
+    body = await request.json()
+    if body.get("registry") and body["registry"] != methods.REGISTRY:
+        await methods.set_registry(body["registry"])
+    if body.get("base_tag"):
+        methods.BASE_TAG = body["base_tag"]
+    scn = scenario.load(body["scenario"])
+    cls = {M.key: M for M in methods.METHODS}.get(body.get("method"), methods.METHODS[0])
+    return body, scn, cls(0, session.bus, session.link, {"scn": scn})
+
+
+async def builder_prepare(request):
+    body, scn, _ = await builder_request(request)
+    return await builder_stream(request, lambda emit: prepare_builder(
+        scn, body["flavor"], lambda kind, **data: emit(kind, data)))
+
+
+async def builder_build(request):
+    body, _, m = await builder_request(request)
+
+    async def work(emit):
+        m.relay = emit
+        await m.build_here(body["version"])
+    return await builder_stream(request, work)
+
+
+async def builder_clean(request):
+    body, _, m = await builder_request(request)
+
+    async def work(emit):
+        await m.clean_here()
+    return await builder_stream(request, work)
 
 
 # -- internal API ------------------------------------------------------------------
@@ -493,6 +629,10 @@ async def main():
         web.get("/api/lanes/{lane}/video", lane_video),
         web.get("/api/source/video", source_video),
         web.get("/api/camera", camera),
+        web.get("/api/builder/health", builder_health),
+        web.post("/api/builder/prepare", builder_prepare),
+        web.post("/api/builder/build", builder_build),
+        web.post("/api/builder/clean", builder_clean),
         web.get("/internal/frames/next", next_frame),
         web.post("/internal/lanes/{lane}/frame", lane_frame),
         web.post("/internal/lanes/{lane}/event", lane_event),

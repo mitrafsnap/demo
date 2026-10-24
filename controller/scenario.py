@@ -94,9 +94,12 @@ async def export_model(model, dest):
     shutil.rmtree(out, ignore_errors=True)
 
 
-async def fetch_assets(scn, emit):
+async def fetch_assets(scn, emit, names=None):
+    """Download (or prepare) the scenario's assets, or only the ones in names."""
     os.makedirs(ASSETS, exist_ok=True)
     for name, spec in scn["assets"].items():
+        if names is not None and name not in names:
+            continue
         dest = asset_path(name, spec)
         if os.path.exists(dest):
             continue
@@ -120,6 +123,18 @@ async def fetch_assets(scn, emit):
             os.remove(archive)
         else:
             await asyncio.to_thread(_download, spec["url"], dest, progress)
+
+
+def app_assets(scn, apple):
+    """Assets the app machine needs: the clip, and with the Apple GPU helper the
+    models it compiles ahead of time. The builder machine needs all of them."""
+    names = {scn["frames"].get("asset") or (scn["frames"].get("fallback") or {}).get("asset")}
+    if apple:
+        for v in scn["versions"]:
+            for spec in version_specs(scn, v).values():
+                if spec.get("enabled") and not spec.get("placeholder"):
+                    names |= {spec.get("asset"), spec.get("decoder_asset")}
+    return names - {None}
 
 
 def version_specs(scn, version):

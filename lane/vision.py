@@ -80,8 +80,8 @@ class RemoteSession:
 
 
 def session(path, threads):
-    if os.environ.get("DEVICE") == "apple":
-        return RemoteSession(path, os.environ["ACCEL_URL"])
+    if os.environ.get("DEVICE") == "apple" and os.environ.get("ACCEL_URL"):
+        return RemoteSession(path, os.environ["ACCEL_URL"])   # else: run here, on the CPU
     opts = ort.SessionOptions()
     opts.intra_op_num_threads = threads
     opts.inter_op_num_threads = 1

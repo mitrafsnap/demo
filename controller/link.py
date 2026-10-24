@@ -1,8 +1,10 @@
-"""Emulated network link between the registry and the lanes.
+"""Network link between the registry and the lanes.
 
 Each lane pulls through its own local port, so its bytes are counted
-separately, while all lanes draw from one shared token bucket like a real
-uplink. Builders push to the registry directly and are not limited.
+separately. When the registry runs on this machine, all lanes also draw from
+one shared token bucket, emulating an edge uplink; when it runs elsewhere, the
+real network is the link and nothing is throttled. Builders push to the
+registry directly and are not limited.
 """
 
 import asyncio
@@ -38,8 +40,8 @@ class Bucket:
 
 
 class LaneLink:
-    def __init__(self, lane, port, bucket, upstream):
-        self.lane, self.port, self.bucket, self.upstream = lane, port, bucket, upstream
+    def __init__(self, lane, port, link):
+        self.lane, self.port, self.link = lane, port, link
         self.bytes = 0
         self.server = None
 
@@ -48,7 +50,7 @@ class LaneLink:
 
     async def handle(self, reader, writer):
         try:
-            up_reader, up_writer = await asyncio.open_connection(*self.upstream)
+            up_reader, up_writer = await asyncio.open_connection(*self.link.upstream)
         except OSError:
             writer.close()
             return
@@ -57,7 +59,7 @@ class LaneLink:
             try:
                 while data := await src.read(64 * 1024):
                     if limited:
-                        await self.bucket.take(len(data))
+                        await self.link.bucket.take(len(data))
                         self.bytes += len(data)
                     dst.write(data)
                     await dst.drain()
@@ -76,7 +78,7 @@ class Link:
         self.lanes = {}
 
     async def add(self, lane, port):
-        link = LaneLink(lane, port, self.bucket, self.upstream)
+        link = LaneLink(lane, port, self)
         await link.start()
         self.lanes[lane] = link
         return link

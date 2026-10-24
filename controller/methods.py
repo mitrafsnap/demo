@@ -10,15 +10,19 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import shutil
 import socket
 import time
 import urllib.error
 import urllib.request
 
+import aiohttp
+
 import scenario
 
-REGISTRY = os.environ.get("DEMO_REGISTRY", "registry:5000")
+LOCAL_REGISTRY = os.environ.get("DEMO_REGISTRY", "registry:5000")
+REGISTRY = LOCAL_REGISTRY      # set_registry() changes it to a registry on another machine
 CONTROLLER = "http://127.0.0.1:8080"
 TDFS_HOME = os.path.join(scenario.ROOT, "tdfs")
 
@@ -61,12 +65,17 @@ def cuda_available():
     return os.path.exists("/dev/nvidia0") and shutil.which("nvidia-container-cli") is not None
 
 
+# Set by prepare when the Apple GPU helper is used, so every lane container of
+# the run gets the same address without probing the helper again.
+APPLE_URL = None
+
+
 def apple_url():
     """URL of the Apple GPU helper (tools/accel) on the Docker Desktop host, as
     an IP address: lane containers can't resolve host.docker.internal."""
     try:
         ip = socket.gethostbyname("host.docker.internal")
-        with urllib.request.urlopen(f"http://{ip}:{ACCEL_PORT}/health", timeout=1):
+        with urllib.request.urlopen(f"http://{ip}:{ACCEL_PORT}/health", timeout=5):
             return f"http://{ip}:{ACCEL_PORT}"
     except OSError:
         return None
@@ -76,18 +85,21 @@ def accelerators():
     return {"cuda": cuda_available(), "apple": apple_url() is not None}
 
 
+HOW_TO = {"cuda": "start the backend with compose.gpu.yaml on a machine with an NVIDIA GPU",
+          "apple": "run tools/accel/run.sh on the Mac"}
+
+
 def device(setting):
-    """Effective device (cuda, apple or cpu) for a setting of auto, gpu or cpu."""
+    """Effective device (cuda, apple or cpu) for a setting of auto, cuda, apple or
+    cpu. auto picks the first accelerator found, else the CPU."""
     if setting == "cpu":
         return "cpu"
     found = accelerators()
-    for dev in ("cuda", "apple"):
-        if found[dev]:
-            return dev
-    if setting == "gpu":
-        raise RuntimeError("device is set to GPU, but there is none: pass an NVIDIA GPU with "
-                           "compose.gpu.yaml or start tools/accel/run.sh on a Mac")
-    return "cpu"
+    if setting in found:
+        if not found[setting]:
+            raise RuntimeError(f"no {setting} device: {HOW_TO[setting]}")
+        return setting
+    return next((d for d in ("cuda", "apple") if found[d]), "cpu")
 
 
 def base_tag(dev):
@@ -114,7 +126,7 @@ class Method:
         self.selected = []                 # slots selected at deploy
         self.enabled = []                  # models enabled in the app
         self.watch = None
-        self.busy = None
+        self.relay = None                  # set by the builder API to stream phases back
 
     # -- helpers -----------------------------------------------------------
 
@@ -122,14 +134,18 @@ class Method:
     def scn(self):
         return self.settings["scn"]
 
-    def repo(self, host=REGISTRY):
-        return f"{host}/{self.key}/{self.scn['name']}"
+    def repo(self, host=None):
+        return f"{host or REGISTRY}/{self.key}/{self.scn['name']}"
 
     def emit(self, kind, **data):
-        self.bus.emit(kind, self.key, **data)
+        if self.relay:
+            self.relay(kind, data)
+        else:
+            self.bus.emit(kind, self.key, **data)
 
-    async def phase(self, name, coro, **data):
-        """Run coro as one named phase and report its start, end and link bytes."""
+    async def phase(self, name, coro, report=None, **data):
+        """Run coro as one named phase and report its start, end and link bytes.
+        report(result) can add fields to the end event."""
         b0 = self.link.bytes(self.key)
         self.emit("phase", phase=name, state="start", **data)
         t0 = time.monotonic()
@@ -138,8 +154,9 @@ class Method:
         except Exception as e:
             self.emit("phase", phase=name, state="error", error=str(e)[-500:])
             raise
+        extra = report(result) if report else {}
         self.emit("phase", phase=name, state="end", seconds=round(time.monotonic() - t0, 3),
-                  bytes=self.link.bytes(self.key) - b0, **data)
+                  bytes=self.link.bytes(self.key) - b0, **data, **extra)
         return result
 
     def ctr(self, *args):
@@ -149,7 +166,43 @@ class Method:
     # -- build -------------------------------------------------------------
 
     async def build(self, version):
+        """Build and push version, here or on the builder machine."""
+        if self.settings.get("builder"):
+            await self.on_builder("build", version=version)
+        else:
+            await self.build_here(version)
+
+    async def clean_build_cache(self):
+        if self.settings.get("builder"):
+            await self.on_builder("clean")
+        else:
+            await self.clean_here()
+
+    async def on_builder(self, action, **body):
+        """Run a build action on the builder machine (another demo backend) and
+        replay the phases it streams back as this lane's events."""
+        url = f"{self.settings['builder'].rstrip('/')}/api/builder/{action}"
+        token = self.settings.get("builder_token")
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        body |= {"method": self.key, "scenario": self.scn["name"], "registry": REGISTRY,
+                 "base_tag": BASE_TAG}
+        timeout = aiohttp.ClientTimeout(total=1800, sock_read=900)
+        async with aiohttp.ClientSession(timeout=timeout) as http:
+            async with http.post(url, json=body, headers=headers) as resp:
+                if resp.status != 200:
+                    raise RuntimeError(f"builder {url}: HTTP {resp.status} {await resp.text()}")
+                async for line in resp.content:
+                    ev = json.loads(line)
+                    if ev["kind"] == "failed":
+                        raise RuntimeError(f"builder: {ev['error']}")
+                    if ev["kind"] != "done":
+                        self.emit(ev.pop("kind"), **ev)
+
+    async def build_here(self, version):
         raise NotImplementedError
+
+    async def clean_here(self):
+        pass
 
     async def buildkit(self, version, extra_output=""):
         ctx = os.path.join(scenario.WORK, self.scn["name"], version)
@@ -159,7 +212,7 @@ class Method:
             "buildctl", "build", "--frontend", "dockerfile.v0",
             "--local", f"context={ctx}", "--local", f"dockerfile={ctx}",
             "--opt", f"build-arg:BASE={base_ref(self.base)}", "--output", out,
-            "--progress", "plain"), version=version, tool="BuildKit")
+            "--progress", "plain"), report=buildkit_rebuilt, version=version, tool="BuildKit")
         await self.phase("push", sh("ctr", "-n", "buildkit", "images", "push", "--plain-http",
                                     ref), version=version)
 
@@ -177,10 +230,16 @@ class Method:
             out, _ = await proc.communicate()
             if proc.returncode:
                 raise RuntimeError(out.decode()[-2000:])
+            return out.decode(errors="replace")
 
-        await self.phase("build", run(), version=version, tool="tdfs")
+        await self.phase("build", run(), report=self.tdfs_rebuilt, version=version, tool="tdfs")
         await self.phase("push", sh("tdfs", "--home-dir", home, "image", "push", "--force-http",
                                     ref), version=version)
+
+    def tdfs_rebuilt(self, log):
+        """tdfs logs [CREATED] for each allotment it builds; cached ones it reuses."""
+        created = len(re.findall(r"Allotment \d+/\d+ \S+ \[CREATED\]|Alltoment \d+/\d+ \S+ \[CREATED\]", log))
+        return {"rebuilt": created, "of": len(self.scn["slots"])}
 
     # -- deploy ------------------------------------------------------------
 
@@ -204,7 +263,7 @@ class Method:
         if env["DEVICE"] == "cuda":
             args += ["--gpus", "0"]
         if env["DEVICE"] == "apple":
-            env["ACCEL_URL"] = apple_url() or ""
+            env["ACCEL_URL"] = APPLE_URL or ""
         if self.lazy:
             args.append("--snapshotter=stargz")
         if cpus:
@@ -220,6 +279,16 @@ class Method:
                          slots=slots if (self.partial or self.lazy) else "all")
         await self.phase("start", self.start(ref))
         self.deployed = ref
+
+    async def running(self):
+        """Whether this lane's container is still running, and its last log lines."""
+        out = await sh(*self.ctr("tasks", "ls"), check=False)
+        alive = any(line.split()[:1] == [self.container] and "RUNNING" in line
+                    for line in out.splitlines())
+        log = ""
+        if not alive:
+            log = await sh("tail", "-n", "8", f"/var/log/node/{self.container}.log", check=False)
+        return alive, log
 
     async def stop(self):
         await self.stop_watch()
@@ -271,17 +340,13 @@ class Method:
         await sh("ctr", "-n", self.key, "content", "prune", "references", check=False)
         self.selected, self.enabled = [], []
 
-    async def clean_build_cache(self):
-        pass
-
-
 class Docker(Method):
     key, title = "docker", "Docker"
 
-    async def build(self, version):
+    async def build_here(self, version):
         await self.buildkit(version)
 
-    async def clean_build_cache(self):
+    async def clean_here(self):
         await sh("buildctl", "prune", "--all", check=False)
         await sh("ctr", "-n", "buildkit", "images", "rm", f"{self.repo()}:live", check=False)
 
@@ -290,21 +355,21 @@ class EStargz(Method):
     key, title = "estargz", "eStargz"
     base, lazy = "esgz", True
 
-    async def build(self, version):
+    async def build_here(self, version):
         await self.buildkit(version, ",compression=estargz,force-compression=true,"
                                      "oci-mediatypes=true")
 
-    clean_build_cache = Docker.clean_build_cache
+    clean_here = Docker.clean_here
 
 
 class TwoDFS(Method):
     key, title = "twodfs", "2DFS"
     partial = True
 
-    async def build(self, version):
+    async def build_here(self, version):
         await self.tdfs(version)
 
-    async def clean_build_cache(self):
+    async def clean_here(self):
         shutil.rmtree(os.path.join(TDFS_HOME, self.key), ignore_errors=True)
 
 
@@ -312,10 +377,10 @@ class MitraFSnap(Method):
     key, title = "mitrafsnap", "MitraFSnap"
     base, lazy, partial, refresh = "zstd", True, True, True
 
-    async def build(self, version):
+    async def build_here(self, version):
         await self.tdfs(version, "--enable-stargz", "--use-zstd")
 
-    clean_build_cache = TwoDFS.clean_build_cache
+    clean_here = TwoDFS.clean_here
 
     async def deploy(self, slots, enabled):
         await super().deploy(slots, enabled)
@@ -381,6 +446,72 @@ class MitraFSnap(Method):
 
 
 METHODS = [Docker, EStargz, TwoDFS, MitraFSnap]
+
+
+def buildkit_rebuilt(log):
+    """COPY steps BuildKit ran (not CACHED), from its plain progress output. Each
+    COPY is one model layer; a change invalidates every layer after it."""
+    copies = set(re.findall(r"^#(\d+) \[\d+/\d+\] COPY ", log, re.M))
+    cached = set(re.findall(r"^#(\d+) CACHED", log, re.M))
+    return {"rebuilt": len(copies - cached), "of": len(copies)}
+
+
+def warm_apple(scn):
+    """Load every model a version of the scenario turns on into the Apple GPU
+    helper, which compiles and caches it by digest."""
+    url = APPLE_URL
+    if not url:
+        return
+    paths = set()
+    for v in scn["versions"]:
+        for spec in scenario.version_specs(scn, v).values():
+            if spec.get("placeholder") or not spec.get("enabled") or spec["kind"] == "yunet":
+                continue   # YuNet runs in OpenCV, not ONNX Runtime
+            for key in ("asset", "decoder_asset"):
+                if spec.get(key):
+                    paths.add(scenario.asset_path(spec[key], scn["assets"][spec[key]]))
+    for path in sorted(paths):
+        with open(path, "rb") as f:
+            req = urllib.request.Request(f"{url}/models", data=f.read(), method="POST")
+        urllib.request.urlopen(req, timeout=600).close()
+
+
+def registry_local():
+    return REGISTRY == LOCAL_REGISTRY
+
+
+async def set_registry(host):
+    """Point builders and lanes at a registry (host:port), or back at the local
+    one for "". BuildKit must be told the registry speaks plain HTTP, so its
+    config is rewritten and it restarts (node-entrypoint keeps it running)."""
+    global REGISTRY
+    REGISTRY = host or LOCAL_REGISTRY
+    hosts = sorted({LOCAL_REGISTRY, REGISTRY})
+    conf = "\n".join(['[worker.oci]', '  enabled = false', '', '[worker.containerd]',
+                      '  enabled = true', '  snapshotter = "overlayfs"', ''] +
+                     [f'[registry."{h}"]\n  http = true\n  insecure = true\n' for h in hosts])
+    with open("/etc/buildkit/buildkitd.toml", "w") as f:
+        f.write(conf)
+    await start_buildkitd()
+
+
+BUILDKITD = None
+
+
+async def start_buildkitd():
+    """(Re)start buildkitd with the current config and wait until it answers."""
+    global BUILDKITD
+    if BUILDKITD and BUILDKITD.returncode is None:
+        BUILDKITD.terminate()
+        await BUILDKITD.wait()
+    log = open("/var/log/node/buildkitd.log", "ab")
+    BUILDKITD = await asyncio.create_subprocess_exec(
+        "buildkitd", "--config", "/etc/buildkit/buildkitd.toml", stdout=log, stderr=log)
+    for _ in range(150):
+        await asyncio.sleep(0.2)
+        if "ID" in await sh("buildctl", "debug", "workers", check=False):
+            return
+    raise RuntimeError("buildkitd did not start; see /var/log/node/buildkitd.log")
 
 
 def node_platform():

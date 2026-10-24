@@ -209,8 +209,12 @@ class Lane:
               models=sorted(self.enabled))
         seq = 0
         while True:
-            status, headers, body = self.client.request(
-                "GET", f"/internal/frames/next?after={seq}&lane={LANE}")
+            try:
+                status, headers, body = self.client.request(
+                    "GET", f"/internal/frames/next?after={seq}&lane={LANE}")
+            except (OSError, http.client.HTTPException):
+                time.sleep(1)   # controller restarting: keep the models, try again
+                continue
             if status != 200:
                 continue
             seq = int(headers.get("X-Seq", seq + 1))
@@ -233,9 +237,12 @@ class Lane:
             meta = {"version": config["version"], "infer_ms": round(infer_ms, 1),
                     "objects": len(detections),
                     "counts": counts, "models": sorted(models)}
-            self.client.request("POST", f"/internal/lanes/{LANE}/frame", jpg.tobytes(),
-                                {"Content-Type": "image/jpeg", "X-Seq": str(seq),
-                                 "X-Meta": json.dumps(meta)})
+            try:
+                self.client.request("POST", f"/internal/lanes/{LANE}/frame", jpg.tobytes(),
+                                    {"Content-Type": "image/jpeg", "X-Seq": str(seq),
+                                     "X-Meta": json.dumps(meta)})
+            except (OSError, http.client.HTTPException):
+                pass
 
 
 def serve_control(lane):

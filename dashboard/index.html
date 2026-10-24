@@ -24,7 +24,6 @@
     <div class="group scenario">
       <span class="label">Scenario</span>
       <select id="scenario"></select>
-      <span id="scenario-desc" class="desc"></span>
       <button id="webcam" hidden>Use my webcam</button>
     </div>
     <div class="group">
@@ -43,22 +42,35 @@
         <option value="0">unlimited</option>
       </select>
       <span class="label">Device</span>
-      <select id="device" title="auto uses the GPU when the backend has one">
+      <select id="device" title="auto uses a GPU when the backend has one">
         <option value="auto">auto</option>
-        <option value="gpu">GPU</option>
+        <option value="apple">Apple GPU</option>
+        <option value="cuda">NVIDIA GPU</option>
         <option value="cpu">CPU</option>
       </select>
       <span class="pill mode" title="All shown methods run at the same time on one machine and share its CPU and link.">live mode</span>
     </div>
+    <div class="group machines">
+      <span class="label">Machines</span>
+      <label>Registry <input id="registry" spellcheck="false" placeholder="this machine"
+        title="host:port of a registry on another machine"></label>
+      <label>Builder <input id="builder" spellcheck="false" placeholder="this machine"
+        title="URL of another demo backend that builds the images"></label>
+      <label class="token">token <input id="builder-token" type="password" placeholder="none"></label>
+      <button id="apply-machines" class="ghost">Apply</button>
+    </div>
   </section>
 
-  <nav class="acts" id="acts"></nav>
+  <p id="scenario-desc" class="desc"></p>
+
+  <section class="stage">
+    <nav class="acts" id="acts" aria-label="Acts"></nav>
+    <div class="workflow">
+      <svg id="diagram" viewBox="0 0 1300 262" preserveAspectRatio="xMidYMid meet" role="img"
+           aria-label="Workflow from build to serving, with replace and refresh update paths"></svg>
+    </div>
+  </section>
   <p class="narration" id="narration" aria-live="polite"></p>
-
-  <section class="workflow">
-    <svg id="diagram" viewBox="0 0 1300 262" preserveAspectRatio="xMidYMid meet" role="img"
-         aria-label="Workflow from build to serving, with replace and refresh update paths"></svg>
-  </section>
 
   <main id="lanes" class="lanes"></main>
 

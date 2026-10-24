@@ -1,7 +1,7 @@
 #!/bin/bash
-# Starts the snapshotter, containerd, buildkitd and the demo controller.
-# The snapshotter runs in a restart loop because the controller kills it to
-# drop its caches between runs (methods.reset_snapshotter).
+# Starts the snapshotter, containerd and the demo controller, which starts
+# buildkitd. The snapshotter runs in a restart loop because the controller
+# kills it to drop its caches between runs (methods.reset_snapshotter).
 set -eu
 
 mkdir -p /run/containerd-stargz-grpc /var/log/node /var/lib/demo
@@ -30,7 +30,8 @@ rm -rf /var/lib/containerd-stargz-grpc/*
 containerd >/var/log/node/containerd.log 2>&1 &
 
 until ctr version >/dev/null 2>&1; do sleep 0.2; done
-buildkitd --config /etc/buildkit/buildkitd.toml >/var/log/node/buildkitd.log 2>&1 &
+# buildkitd is started by the controller, which restarts it when the
+# registry changes (methods.set_registry)
 
 echo "node ready: $(uname -m), containerd $(containerd --version | awk '{print $3}')"
 cd /opt/demo/controller

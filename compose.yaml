@@ -16,7 +16,8 @@ services:
     volumes:
       - registry-data:/var/lib/registry
     ports:
-      - "127.0.0.1:5000:5000"
+      # DEMO_REGISTRY_BIND=0.0.0.0 lets builders and apps on other machines use it
+      - "${DEMO_REGISTRY_BIND:-127.0.0.1}:5000:5000"
 
   node:
     build:

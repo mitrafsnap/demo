@@ -18,7 +18,7 @@ import urllib.request
 
 from playwright.sync_api import sync_playwright
 
-ACTS = ["prepare", "reset", "build-v1", "deploy", "add-model", "build-v3", "rollout-v3", "patch"]
+ACTS = ["deploy", "add-model", "upgrade", "patch"]
 
 ap = argparse.ArgumentParser()
 ap.add_argument("base")

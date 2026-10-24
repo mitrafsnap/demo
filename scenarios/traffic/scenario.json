@@ -1,7 +1,7 @@
 {
   "name": "traffic",
   "title": "Traffic camera",
-  "description": "A city camera at a busy crossing. v1 detects people and cars; v2 adds instance segmentation; v3 ships a stronger detector that also recognizes bicycles, buses and trucks; v4 patches a large model this camera never uses.",
+  "description": "A city camera at a busy crossing. v1 detects people and cars; v2 adds instance segmentation; v3 ships a stronger detector that also recognizes bicycles, motorcycles, buses and trucks; v4 patches a 528 MB model the camera never loads.",
   "frames": {
     "kind": "file",
     "asset": "clip",
@@ -16,10 +16,10 @@
     "config"
   ],
   "docker_order": [
-    "aux",
-    "classifier",
-    "segmenter",
     "detector",
+    "segmenter",
+    "classifier",
+    "aux",
     "config"
   ],
   "select": [
@@ -147,7 +147,7 @@
           "train"
         ],
         "enabled": true,
-        "label": "YOLOX-S: + bicycles, motorcycles, buses, trucks, streetcars"
+        "label": "YOLOX-S: + bicycles, motorcycles, buses, trucks"
       }
     },
     "v4": {
@@ -159,5 +159,11 @@
       }
     }
   },
-  "add": "segmenter"
+  "add": "segmenter",
+  "words": {
+    "needs": "the detector",
+    "added": "an instance segmenter (MobileSAM, 44 MB)",
+    "v3": "a stronger detector that also recognizes bicycles, motorcycles, buses and trucks",
+    "visible_v3": "bicycles and buses get boxes"
+  }
 }

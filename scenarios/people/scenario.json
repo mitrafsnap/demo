@@ -1,7 +1,7 @@
 {
   "name": "people",
   "title": "People camera (webcam)",
-  "description": "A camera that watches people. v1 finds faces; v2 adds body pose; v3 ships an expression model that recognizes smiles; v4 patches a large model this camera never uses.",
+  "description": "A camera that watches people. v1 finds faces; v2 adds body pose; v3 ships an expression model that labels smiles; v4 patches a 528 MB model the camera never loads.",
   "frames": {
     "kind": "camera",
     "fps": 10,
@@ -21,32 +21,17 @@
     "config"
   ],
   "docker_order": [
-    "aux",
-    "classifier",
-    "pose",
     "face",
+    "pose",
     "expression",
+    "classifier",
+    "aux",
     "config"
   ],
   "select": [
     "face",
     "config"
   ],
-  "acts": {
-    "add-model": {
-      "title": "Add pose",
-      "what": "v2: build + roll out",
-      "narration": "v2 ships body pose, a model the first image did not contain. Every method rebuilds and rolls it out; MitraFSnap refreshes the running container and fetches the model when the app opens it."
-    },
-    "build-v3": {
-      "title": "Build v3",
-      "what": "new expression model",
-      "narration": "v3 ships an expression model that recognizes smiles. Only the changed parts are rebuilt."
-    },
-    "rollout-v3": {
-      "narration": "Rolling out v3. Docker, eStargz and 2DFS stop, pull and restart. MitraFSnap refreshes the running container's files in place, and smiles start being labeled while it keeps serving."
-    }
-  },
   "assets": {
     "clip": {
       "url": "https://upload.wikimedia.org/wikipedia/commons/7/7f/AFN_InFocus-_DDG117_holds_Sevillanas_dance_Classes_%28960160%29.webm",
@@ -146,5 +131,11 @@
       }
     }
   },
-  "add": "pose"
+  "add": "pose",
+  "words": {
+    "needs": "the face detector",
+    "added": "body pose (RTMPose, 54 MB)",
+    "v3": "an expression model that labels smiles and other expressions",
+    "visible_v3": "faces get expression labels"
+  }
 }
