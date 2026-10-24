@@ -93,9 +93,16 @@ button.ghost { background: transparent; }
 .label { color: var(--muted); font-size: 14px; text-transform: uppercase; letter-spacing: .6px; }
 .desc { color: var(--muted); font-size: 17px; margin: 8px 20px 0; }
 #device { max-width: 190px; }
-.conn.machines input { width: 140px; }
+.conn.machines input { width: 150px; }
 .conn.machines .token input { width: 70px; }
-.theme { white-space: nowrap; }
+.theme { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 32px; padding: 0; }
+.theme svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.theme .moon { fill: currentColor; stroke: none; }
+:root[data-theme="light"] .theme .sun, :root:not([data-theme="light"]) .theme .moon { display: none; }
+/* hatches as in the paper's figures */
+.hatch { fill: none; stroke: #111; stroke-width: 1.1; }
+.hkey { width: 24px; height: 13px; display: inline-block; flex: none; }
+.hkey rect { stroke: #111; stroke-width: 1; }
 .toggles { display: flex; gap: 6px; flex-wrap: wrap; }
 .toggles label {
   display: flex; gap: 6px; align-items: center; padding: 3px 10px; border-radius: 6px;
@@ -215,6 +222,7 @@ button.ghost { background: transparent; }
 .chart .value { fill: var(--text); font: 700 16px var(--font); }
 .chart .arrow { stroke: var(--muted); stroke-width: 1.5; fill: none; }
 .chart .arrowhead { fill: var(--muted); }
+.chart .bar { stroke: #111; stroke-width: 1; }
 .chart .line { fill: none; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
 .chart .end { stroke: var(--panel); stroke-width: 2; }
 .chart .crosshair { stroke: var(--muted); stroke-width: 1; }

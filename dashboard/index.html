@@ -10,27 +10,45 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- hatch fills of the methods, as in the paper's figures -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <pattern id="hatch-docker" width="10" height="10" patternUnits="userSpaceOnUse">
+        <rect width="10" height="10" fill="var(--docker)"/><g class="hatch"><path d="M-2.5,2.5l5,-5M0,10l10,-10M7.5,12.5l5,-5"/></g>
+      </pattern>
+      <pattern id="hatch-estargz" width="12" height="12" patternUnits="userSpaceOnUse">
+        <rect width="12" height="12" fill="var(--estargz)"/><g class="hatch"><polygon points="6.00,2.60 6.85,4.83 9.23,4.95 7.38,6.45 8.00,8.75 6.00,7.45 4.00,8.75 4.62,6.45 2.77,4.95 5.15,4.83"/></g>
+      </pattern>
+      <pattern id="hatch-twodfs" width="10" height="10" patternUnits="userSpaceOnUse">
+        <rect width="10" height="10" fill="var(--twodfs)"/><g class="hatch"><path d="M-2.5,2.5l5,-5M0,10l10,-10M7.5,12.5l5,-5M-2.5,7.5l5,5M0,0l10,10M7.5,-2.5l5,5"/></g>
+      </pattern>
+      <pattern id="hatch-mitrafsnap" width="10" height="10" patternUnits="userSpaceOnUse">
+        <rect width="10" height="10" fill="var(--mitrafsnap)"/><g class="hatch"><circle cx="5" cy="5" r="1.9"/></g>
+      </pattern>
+    </defs>
+  </svg>
   <header class="top">
     <div class="brand">
       <span class="logo">MitraFSnap</span>
       <span class="sub">live demo</span>
     </div>
-    <div class="conn">
-      <label>Backend <input id="backend" spellcheck="false" placeholder="same origin"></label>
-      <label class="token">Token <input id="token" type="password" placeholder="none"></label>
-      <button id="connect">Connect</button>
-      <span id="status" class="pill">offline</span>
-    </div>
     <div class="conn machines">
       <span class="label">Machines</span>
       <label>Registry <input id="registry" spellcheck="false" placeholder="this machine"
-        title="host:port of a registry on another machine"></label>
+        title="host:port of the registry, empty for the registry of the backend"></label>
       <label>Builder <input id="builder" spellcheck="false" placeholder="this machine"
-        title="URL of another demo backend that builds the images"></label>
-      <label class="token">Token <input id="builder-token" type="password" placeholder="none"></label>
-      <button id="apply-machines" class="ghost">Apply</button>
+        title="URL of the demo backend that builds the images, empty for the backend itself"></label>
+      <label class="token">token <input id="builder-token" type="password" placeholder="none"></label>
+      <label>Backend <input id="backend" spellcheck="false" placeholder="this machine"
+        title="URL of the demo backend that runs the lanes, empty for the machine that serves this page"></label>
+      <label class="token">token <input id="token" type="password" placeholder="none"></label>
+      <button id="apply-machines">Apply</button>
+      <span id="status" class="pill">offline</span>
     </div>
-    <button id="theme" class="ghost theme" type="button">Light mode</button>
+    <button id="theme" class="ghost theme" type="button" aria-label="Switch to light mode" title="Switch to light mode">
+      <svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>
+      <svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></svg>
+    </button>
   </header>
 
   <section class="controls">

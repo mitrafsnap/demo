@@ -314,7 +314,7 @@ function renderControls() {
   $("#lane-toggles").innerHTML = info.methods.map((m) => `
     <label>
       <input type="checkbox" value="${m.key}" ${info.settings.lanes.includes(m.key) ? "checked" : ""}>
-      <span class="dot" style="background:var(${COLORS[m.key]})"></span>${m.title}</label>`).join("");
+      ${hatchKey(m.key)}${m.title}</label>`).join("");
   $("#lane-toggles").onchange = () => setLanes(
     [...document.querySelectorAll("#lane-toggles input:checked")].map((i) => i.value));
   $("#webcam").hidden = info.scenario.frames !== "camera";
@@ -378,7 +378,7 @@ function renderLanes() {
   $("#lanes").classList.toggle("one", lanes.length === 1);
   $("#lanes").innerHTML = lanes.map((k) => `<article class="lane" id="lane-${k}">
       <header>
-        <span class="swatch" style="background:var(${COLORS[k]})"></span>
+        ${hatchKey(k)}
         <h2>${title(k)}</h2>
         <span class="tags">${TAGS[k].map((t) => `<span class="pill">${t}</span>`).join("")}</span>
         <span class="phase" data-f="phase">idle</span>
@@ -510,6 +510,11 @@ function setNode(k, node, phase) {
 
 // ---------------------------------------------------------------- charts
 
+// A small legend key filled with the method's hatch.
+function hatchKey(k) {
+  return `<svg class="hkey" viewBox="0 0 24 13" aria-hidden="true"><rect x=".5" y=".5" width="23" height="12" fill="url(#hatch-${k})"/></svg>`;
+}
+
 function svgEl(w, h, body, label) {
   return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="${label}">${body}</svg>`;
 }
@@ -547,7 +552,7 @@ function hbars(values, fmt, lower = true) {
   lanes.forEach((k, i) => {
     const y = T + i * rowH, v = values[k], w = Math.max(x(v) - L0, 1.5), r = Math.min(4, w);
     body += `<text class="name" x="${L0 - 10}" y="${y + 23}" text-anchor="end">${title(k)}</text>
-      <path class="bar" fill="var(${COLORS[k]})" d="M${L0},${y + 6} H${L0 + w - r} Q${L0 + w},${y + 6} ${L0 + w},${y + 6 + r}
+      <path class="bar" fill="url(#hatch-${k})" d="M${L0},${y + 6} H${L0 + w - r} Q${L0 + w},${y + 6} ${L0 + w},${y + 6 + r}
         V${y + 30 - r} Q${L0 + w},${y + 30} ${L0 + w - r},${y + 30} H${L0} Z"><title>${title(k)}: ${fmt(v)}</title></path>
       <text class="value" x="${L0 + w + 8}" y="${y + 24}">${fmt(v)}</text>`;
   });
@@ -561,7 +566,8 @@ function columns(groups, fmt, highlight = "mitrafsnap") {
   const lanes = shown();
   const W = 560, H = 250, L0 = 52, R = 64, B = 214, T = 26;
   const vals = groups.flatMap((g) => lanes.map((k) => g.values[k]).filter((v) => v != null));
-  const { step, top } = niceScale(Math.max(1, ...vals));
+  // at least 4 s, so the ticks stay whole seconds before the first values arrive
+  const { step, top } = niceScale(Math.max(4, ...vals));
   const y = (v) => B - (v / top) * (B - T);
   const gw = (W - L0 - R) / groups.length;
   const bw = Math.min(24, (gw - 22) / lanes.length - 2);
@@ -577,7 +583,7 @@ function columns(groups, fmt, highlight = "mitrafsnap") {
       const v = g.values[k];
       if (v == null) return;
       const x = x0 + li * (bw + 2), yy = Math.min(y(v), B - 1.5), h = B - yy, r = Math.min(4, h);
-      body += `<path class="bar" fill="var(${COLORS[k]})" d="M${x},${B} V${yy + r} Q${x},${yy} ${x + r},${yy}
+      body += `<path class="bar" fill="url(#hatch-${k})" d="M${x},${B} V${yy + r} Q${x},${yy} ${x + r},${yy}
         H${x + bw - r} Q${x + bw},${yy} ${x + bw},${yy + r} V${B} Z"><title>${title(k)}, ${g.label}: ${fmt(v)}</title></path>`;
       if (k === highlight)
         body += `<text class="value" x="${x + bw / 2}" y="${yy - 6}" text-anchor="middle">${fmt(v)}</text>`;
@@ -673,7 +679,7 @@ function renderCharts() {
   const box = $("#charts");
   const data = chartData();
   $("#chart-legend").innerHTML = shown().map((k) =>
-    `<span class="key"><span class="dot" style="background:var(${COLORS[k]})"></span>${title(k)}</span>`).join("");
+    `<span class="key">${hatchKey(k)}${title(k)}</span>`).join("");
   if (state.tables) { box.innerHTML = tables(data); return; }
   const empty = (vals) => Object.values(vals).every((v) => v == null);
   const wait = (when) => `<p class="tick">shown ${when}</p>`;
@@ -888,7 +894,6 @@ function tick() {
   requestAnimationFrame(tick);
 }
 
-$("#connect").onclick = connect;
 $("#webcam").onclick = toggleWebcam;
 $("#all-lanes").onclick = () => setLanes(state.info.methods.map((m) => m.key));
 $("#chart-mode").onclick = (e) => {
@@ -896,10 +901,17 @@ $("#chart-mode").onclick = (e) => {
   e.target.textContent = state.tables ? "Show charts" : "Show as tables";
   renderCharts();
 };
+// One Apply for the three machines. The backend is where this page connects;
+// the registry and the builder are settings of that backend.
 $("#apply-machines").onclick = async () => {
+  const base = $("#backend").value.trim().replace(/\/$/, ""), token = $("#token").value.trim();
+  if (base !== state.base || token !== state.token || !state.info) await connect();
+  if (!state.info) return;
+  const registry = $("#registry").value.trim(), builder = $("#builder").value.trim();
+  const s = state.info.settings;
+  if (registry === (s.registry || "") && builder === (s.builder || "") && !$("#builder-token").value) return;
   try {
-    await api("/api/settings", { registry: $("#registry").value.trim(), builder: $("#builder").value.trim(),
-      builder_token: $("#builder-token").value });
+    await api("/api/settings", { registry, builder, builder_token: $("#builder-token").value });
     log("machines updated, Act 1 prepares the builder and the registry");
     await connect();
   } catch (err) { log(`machines: ${err.message}`); $("#narration").textContent = err.message; }
@@ -918,7 +930,9 @@ $("#scenario").onchange = async (e) => {
 };
 // Dark by default; the choice is remembered per browser.
 function themeLabel() {
-  $("#theme").textContent = document.documentElement.dataset.theme === "light" ? "Dark mode" : "Light mode";
+  const text = document.documentElement.dataset.theme === "light" ? "Switch to dark mode" : "Switch to light mode";
+  $("#theme").setAttribute("aria-label", text);
+  $("#theme").title = text;
 }
 $("#theme").onclick = () => {
   const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";

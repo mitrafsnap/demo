@@ -148,30 +148,31 @@ demo does not provide yet.
 
 ### Running the parts on separate machines
 
-By default the whole demo runs on one machine. The app backend, the registry and the builder
-can each move to another machine, and every machine runs the same backend with
-`docker compose up -d --build`.
+By default the whole demo runs on one machine. The backend, the registry and the builder can
+each move to another machine, and every machine runs the same stack with
+`docker compose up -d --build`. The Machines row at the top of the dashboard has one field for
+each of them. An empty field means the machine that serves the dashboard, and Apply takes
+effect for all three at once.
 
-The app backend runs the lanes, plays the camera feed and coordinates the acts, and the
-dashboard connects to it through the Backend field. To reach a backend on another machine, for
-example a DGX Spark next to the camera, start it with a token.
+The backend runs the lanes, plays the camera feed and coordinates the acts, and the dashboard
+talks to it through the Backend field. To reach a backend on another machine, for example a
+DGX Spark next to the camera, start it with a token.
 
 ```sh
 DEMO_BIND=0.0.0.0 DEMO_TOKEN=choose-a-secret docker compose up -d --build
 ```
 
-Then open `http://<machine>:8080/?token=choose-a-secret`. An SSH tunnel
-(`ssh -L 8080:localhost:8080 <machine>`) also works, and it is the simplest way to use a
-webcam with a remote backend.
+Then open `http://<machine>:8080/?token=choose-a-secret`, or enter the URL and the token in the
+Backend fields. An SSH tunnel (`ssh -L 8080:localhost:8080 <machine>`) also works, and it is the
+simplest way to use a webcam with a remote backend.
 
-The Machines row of the dashboard sets the other two parts. The registry field takes the
-`host:port` of a registry that both the app backend and the builder can reach. Any demo
-backend can serve as the registry if it was started with `DEMO_REGISTRY_BIND=0.0.0.0`. The
-builder field takes the URL of another demo backend, plus its `DEMO_TOKEN` if it has one. The
-app backend then sends the base image preparation and every build to that machine and streams
-the build phases back into the dashboard.
+The Registry field takes the `host:port` of a registry that both the backend and the builder
+can reach. Any machine running the demo can serve as the registry if it was started with
+`DEMO_REGISTRY_BIND=0.0.0.0`. The Builder field takes the URL of another machine running the
+demo, with its `DEMO_TOKEN` if it has one. The backend then sends the base image preparation
+and every build to that machine and streams the build phases back into the dashboard.
 
-The edge link emulation applies only when the registry runs on the app's machine. With a
+The edge link emulation applies only when the registry runs on the backend's machine. With a
 remote registry the lanes pull over the real network, the edge link setting shows "real
 network", and the demo still counts the downloaded bytes of each method. A change to the
 machines takes effect at the next Act 1.
