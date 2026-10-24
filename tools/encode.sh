@@ -7,7 +7,7 @@
 # from <mp4 start> at <speed>x with a speed badge. demo-full.mp4 keeps the
 # recording's resolution at high quality; demo.mp4 is 1280 px wide for the
 # repository. The GIF is a real-time excerpt of the top GIF_HEIGHT pixels
-# (default 1220: acts, diagram and lanes). Uses ffmpeg from a container.
+# (default 1250, the acts, the diagram and the lanes). Uses ffmpeg from a container.
 set -eu
 dir=$(cd "$1" && pwd); start=$2; speed=$3; gstart=$4; glen=$5
 here=$(cd "$(dirname "$0")" && pwd)
@@ -33,11 +33,11 @@ render() {
 render demo-full "scale=iw:ih" 18
 render demo "scale=1280:-2:flags=lanczos" 23
 ff -ss "$gstart" -t "$glen" -i timeline.mp4 \
-   -vf "crop=iw:min(ih\,${GIF_HEIGHT:-1220}):0:0,fps=12,scale=1440:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=256:stats_mode=full[p];[b][p]paletteuse=dither=sierra2_4a" \
+   -vf "crop=iw:min(ih\,${GIF_HEIGHT:-1250}):0:0,fps=12,scale=1440:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=256:stats_mode=full[p];[b][p]paletteuse=dither=sierra2_4a" \
    demo-highlight.gif
 # the same excerpt as a small looping video, for web pages
 ff -ss "$gstart" -t "$glen" -i timeline.mp4 -an \
-   -vf "crop=iw:min(ih\,${GIF_HEIGHT:-1220}):0:0,scale=1440:-2:flags=lanczos" \
+   -vf "crop=iw:min(ih\,${GIF_HEIGHT:-1250}):0:0,scale=1440:-2:flags=lanczos" \
    -c:v libx264 -preset slower -tune animation -crf 23 -pix_fmt yuv420p -movflags +faststart \
    demo-highlight.mp4
 echo "frame size $size"

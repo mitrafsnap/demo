@@ -66,17 +66,17 @@ We ran the traffic scenario on a MacBook Pro (M4 Pro, 14 CPUs) with the Apple GP
 
 | | Docker | eStargz | 2DFS | MitraFSnap |
 |---|---:|---:|---:|---:|
-| Act 1, until the first frame | 70.2 s | 40.3 s | 24.0 s | **16.6 s** |
-| Act 2, until the segmenter is live | 29.0 s | 29.7 s | 10.3 s | **8.3 s** |
-| Act 3, until the new detector is live | 36.2 s | 36.1 s | 13.7 s | **12.6 s** |
-| Act 4, until the patch is live | 72.7 s | 43.2 s | 20.2 s | **15.2 s** |
-| Total downtime, Acts 2 to 4 | 73.5 s | 26.1 s | 12.8 s | **0 s** |
-| Total time, all acts | 208.1 s | 149.3 s | 68.3 s | **52.8 s** |
-| Total build and push | 84.5 s | 109.0 s | 41.1 s | **34.6 s** |
-| Downloaded | 1475 MB | 679 MB | 227 MB | **173 MB** |
+| Act 1, until the first frame | 75.1 s | 44.4 s | 26.0 s | **19.3 s** |
+| Act 2, until the segmenter is live | 29.5 s | 27.4 s | 9.9 s | **7.6 s** |
+| Act 3, until the new detector is live | 34.0 s | 33.4 s | 11.4 s | **10.9 s** |
+| Act 4, until the patch is live | 72.3 s | 42.5 s | 21.8 s | **16.6 s** |
+| Total downtime, Acts 2 to 4 | 74.6 s | 25.8 s | 12.6 s | **0 s** |
+| Total time, all acts | 210.9 s | 147.8 s | 69.1 s | **54.4 s** |
+| Total build and push | 81.4 s | 101.8 s | 41.5 s | **35.5 s** |
+| Downloaded | 1475 MB | 679 MB | 227 MB | **174 MB** |
 
-The people scenario gives the same order. MitraFSnap has no downtime and needs 49.7 s in total,
-compared with 209.0 s for Docker, 213.5 s for eStargz and 67.4 s for 2DFS.
+The people scenario gives the same order. MitraFSnap has no downtime and needs 46.7 s in total,
+compared with 211.2 s for Docker, 127.3 s for eStargz and 62.0 s for 2DFS.
 
 The four methods share the CPU, the GPU and the link of one machine in this mode, so these
 numbers illustrate the behavior of each method and should not be read as a benchmark. The
