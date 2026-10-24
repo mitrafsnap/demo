@@ -1,9 +1,12 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MitraFSnap Live Demo</title>
+  <script>
+    try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -18,6 +21,16 @@
       <button id="connect">Connect</button>
       <span id="status" class="pill">offline</span>
     </div>
+    <div class="conn machines">
+      <span class="label">Machines</span>
+      <label>Registry <input id="registry" spellcheck="false" placeholder="this machine"
+        title="host:port of a registry on another machine"></label>
+      <label>Builder <input id="builder" spellcheck="false" placeholder="this machine"
+        title="URL of another demo backend that builds the images"></label>
+      <label class="token">Token <input id="builder-token" type="password" placeholder="none"></label>
+      <button id="apply-machines" class="ghost">Apply</button>
+    </div>
+    <button id="theme" class="ghost theme" type="button">Light mode</button>
   </header>
 
   <section class="controls">
@@ -49,15 +62,6 @@
         <option value="cpu">CPU</option>
       </select>
       <span class="pill mode" title="All shown methods run at the same time on one machine and share its CPU and link.">live mode</span>
-    </div>
-    <div class="group machines">
-      <span class="label">Machines</span>
-      <label>Registry <input id="registry" spellcheck="false" placeholder="this machine"
-        title="host:port of a registry on another machine"></label>
-      <label>Builder <input id="builder" spellcheck="false" placeholder="this machine"
-        title="URL of another demo backend that builds the images"></label>
-      <label class="token">token <input id="builder-token" type="password" placeholder="none"></label>
-      <button id="apply-machines" class="ghost">Apply</button>
     </div>
   </section>
 

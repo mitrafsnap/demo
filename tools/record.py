@@ -25,7 +25,7 @@ ap.add_argument("base")
 ap.add_argument("--lanes", default="all")
 ap.add_argument("--scenario", default="traffic")
 ap.add_argument("--width", type=int, default=1920)
-ap.add_argument("--height", type=int, default=1080)
+ap.add_argument("--height", type=int, default=0, help="viewport height, 0 fits the whole page")
 ap.add_argument("--hold", type=float, default=4, help="seconds to show each act's result")
 ap.add_argument("--speed", default="2", help="playback speed the intro card announces")
 ap.add_argument("--check", action="store_true", help="one screenshot, no acts")
@@ -67,8 +67,16 @@ call("/api/settings", {"lanes": LANES})
 
 with sync_playwright() as p:
     browser = p.chromium.launch()
-    page = browser.new_page(viewport={"width": args.width, "height": args.height})
+    page = browser.new_page(viewport={"width": args.width, "height": args.height or 1080})
     page.on("pageerror", lambda e: print("pageerror:", e))
+    height = args.height
+    if not height:   # fit the whole dashboard, so the bottom charts stay in the frame
+        page.goto(f"{args.base}/?backend={args.base}")
+        page.wait_for_selector("#status.ok", timeout=30_000)
+        page.wait_for_timeout(2500)
+        height = (page.evaluate("document.documentElement.scrollHeight") + 9) // 2 * 2   # even, for H.264
+        page.set_viewport_size({"width": args.width, "height": height})
+        print(f"viewport {args.width}x{height}", flush=True)
     if not args.check:
         os.makedirs("/out/frames", exist_ok=True)
         for slide in (1, 2):   # title cards for the start of the video
@@ -90,6 +98,10 @@ with sync_playwright() as p:
             path = f"/out/frames/{len(stamps):06d}.jpg"
             page.screenshot(path=path, type="jpeg", quality=93)
             stamps.append((path, t))
+            if len(stamps) % 40 == 0:
+                grown = page.evaluate("document.documentElement.scrollHeight")
+                if grown > height:
+                    print(f"page grew to {grown} px, the bottom is cut off", flush=True)
         with open("/out/frames.txt", "w") as f:
             for (path, t), (_, t_next) in zip(stamps, stamps[1:] + [(None, t + 0.1)]):
                 f.write(f"file 'frames/{os.path.basename(path)}'\nduration {t_next - t:.4f}\n")

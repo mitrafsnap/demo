@@ -456,7 +456,7 @@ function drawTimeline(k) {
   }
   g.fillStyle = cssVar(COLORS[k]);
   for (const t of L.frames) if (t >= t0) g.fillRect(x(t), 8, 1.5, h - 16);
-  g.fillStyle = "rgba(230,232,238,.6)";
+  g.fillStyle = cssVar("--muted");
   g.font = `${12 * devicePixelRatio}px ${cssVar("--font")}`;
   for (const a of ACTS) {
     const t = state.acts[a.id]?.t;
@@ -485,7 +485,7 @@ function drawDiagram() {
     ${ROWS.map(row).join("")}
     ${EDGES.map(edge).join("")}${Object.entries(NODES).map(node).join("")}
     ${shown().map((k) => `<g class="marker" id="marker-${k}" style="opacity:0">
-      <circle r="12" fill="var(${COLORS[k]})" stroke="#0f1115" stroke-width="1.5"/><text text-anchor="middle" y="4.5">${LETTER[k]}</text>
+      <circle r="12" fill="var(${COLORS[k]})" stroke="var(--bg)" stroke-width="1.5"/><text text-anchor="middle" y="4.5">${LETTER[k]}</text>
     </g>`).join("")}`;
   for (const k of shown()) placeMarker(k);
 }
@@ -916,6 +916,18 @@ $("#device").onchange = async (e) => {
 $("#scenario").onchange = async (e) => {
   try { await api("/api/settings", { scenario: e.target.value }); await connect(); } catch (err) { log(err.message); }
 };
+// Dark by default; the choice is remembered per browser.
+function themeLabel() {
+  $("#theme").textContent = document.documentElement.dataset.theme === "light" ? "Dark mode" : "Light mode";
+}
+$("#theme").onclick = () => {
+  const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("theme", next); } catch (e) { /* storage may be unavailable */ }
+  themeLabel();
+  renderCharts();
+};
+themeLabel();
 loadPrefs();
 const introSlide = Number(new URLSearchParams(location.search).get("intro"));
 connect().then(() => {

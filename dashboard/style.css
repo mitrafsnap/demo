@@ -27,13 +27,28 @@
   --good: #3fb27f;
   --warn: #e0a84a;
   --bad: #ef6b6b;
+  --warn-line: #5a4a2a;
   /* method colors, as in the paper's figures */
   --docker: #1c39bb;
   --estargz: #b4745e;
   --twodfs: #00a693;
   --mitrafsnap: #cc3333;
   --font: "CMU Sans Serif", ui-sans-serif, system-ui, sans-serif;
+  color-scheme: dark;
   font: 17px/1.4 var(--font);
+}
+:root[data-theme="light"] {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --panel-2: #eceef2;
+  --line: #d5d9e0;
+  --text: #15171c;
+  --muted: #5b6270;
+  --good: #1d8655;
+  --warn: #a8701a;
+  --bad: #c43c3c;
+  --warn-line: #e3cfa4;
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; }
@@ -58,8 +73,8 @@ button.ghost { background: transparent; }
 .brand .sub { color: var(--muted); margin-left: 6px; }
 .conn { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .conn label { color: var(--muted); display: flex; gap: 6px; align-items: center; }
-.conn input { width: 220px; }
-.conn .token input { width: 110px; }
+.conn input { width: 180px; }
+.conn .token input { width: 80px; }
 
 .pill {
   display: inline-block; padding: 1px 10px; border-radius: 999px; font-size: 15px;
@@ -67,7 +82,7 @@ button.ghost { background: transparent; }
 }
 .pill.ok { color: var(--good); border-color: var(--good); }
 .pill.bad { color: var(--bad); border-color: var(--bad); }
-.pill.mode { color: var(--warn); border-color: #5a4a2a; }
+.pill.mode { color: var(--warn); border-color: var(--warn-line); }
 
 .controls {
   display: flex; gap: 10px 24px; padding: 8px 20px; flex-wrap: wrap; align-items: center;
@@ -78,9 +93,9 @@ button.ghost { background: transparent; }
 .label { color: var(--muted); font-size: 14px; text-transform: uppercase; letter-spacing: .6px; }
 .desc { color: var(--muted); font-size: 17px; margin: 8px 20px 0; }
 #device { max-width: 190px; }
-.machines label { color: var(--muted); display: flex; gap: 6px; align-items: center; }
-.machines input { width: 190px; }
-.machines .token input { width: 90px; }
+.conn.machines input { width: 140px; }
+.conn.machines .token input { width: 70px; }
+.theme { white-space: nowrap; }
 .toggles { display: flex; gap: 6px; flex-wrap: wrap; }
 .toggles label {
   display: flex; gap: 6px; align-items: center; padding: 3px 10px; border-radius: 6px;
@@ -108,7 +123,7 @@ button.ghost { background: transparent; }
 .act.error { border-color: var(--bad); }
 .act.reset { display: block; text-align: center; padding: 5px 12px; }
 
-.narration { margin: 8px 20px 0; min-height: 26px; color: var(--muted); font-size: 18px; }
+.narration { margin: 8px 20px 0; min-height: 2.8em; color: var(--muted); font-size: 18px; }
 .narration strong { color: var(--text); margin-right: 6px; }
 
 .workflow { overflow-x: auto; }
@@ -157,7 +172,7 @@ button.ghost { background: transparent; }
 .video.stale .nosignal { display: flex; }
 .video .badge {
   position: absolute; right: 8px; bottom: 8px; padding: 1px 8px; border-radius: 4px;
-  background: rgba(0, 0, 0, .65); font-size: 15px;
+  background: rgba(0, 0, 0, .65); color: #e6e8ee; font-size: 15px;
 }
 .timeline { width: 100%; height: 26px; display: block; background: var(--panel-2); }
 .metrics {
@@ -184,6 +199,8 @@ button.ghost { background: transparent; }
   margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
   padding: 10px 12px 6px; min-width: 0;
 }
+/* charts keep the height of their filled state, so the page does not grow during a run */
+@media (min-width: 1701px) { .chart { min-height: 352px; } }
 .chart figcaption { display: flex; flex-direction: column; margin-bottom: 2px; }
 .chart figcaption strong { font-size: 18px; }
 .chart figcaption span { color: var(--muted); font-size: 15px; }
@@ -254,7 +271,7 @@ button.ghost { background: transparent; }
   :root { font-size: 16px; }
   .top, .controls, .stage, .bottom, .lanes, .compare { padding-left: 16px; padding-right: 16px; }
   .narration { margin-left: 16px; margin-right: 16px; }
-  .conn input { width: 140px; }
+  .conn input, .conn.machines input { width: 140px; }
   .acts { grid-template-columns: minmax(0, 1fr); }
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   /* keep the diagram readable and let it scroll sideways */
