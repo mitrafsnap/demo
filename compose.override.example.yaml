@@ -2,12 +2,12 @@
 services:
   registry:
     build:
-      context: ../2dfs-registry
+      context: ../registry
   node:
     build:
       additional_contexts:
-        snapshotter: ../stargz-snapshotter
-        builder: ../2dfs-builder
+        snapshotter: ../snapshotter
+        builder: ../builder
     # Live-edit the controller, dashboard and scenarios: restart the node to reload.
     volumes:
       - ./controller:/opt/demo/controller

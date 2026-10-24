@@ -1,7 +1,7 @@
 {
   "name": "traffic",
   "title": "Traffic camera",
-  "description": "A city camera at a busy crossing. v1 detects people and cars; v2 adds instance segmentation; v3 ships a stronger detector that also recognizes bicycles, motorcycles, buses and trucks; v4 patches a 528 MB model the camera never loads.",
+  "description": "A city camera at a busy crossing. v1 detects people and cars, v2 adds instance segmentation, v3 ships a stronger detector that also recognizes bicycles, motorcycles, buses and trucks, and v4 patches a 528 MB model the camera never loads.",
   "frames": {
     "kind": "file",
     "asset": "clip",

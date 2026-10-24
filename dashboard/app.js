@@ -5,9 +5,9 @@
 // The four acts. Every update act builds, pushes and rolls out one version.
 const ACTS = [
   { id: "deploy", n: "Act 1", title: "Deploy v1", what: "build, push and start the camera" },
-  { id: "add-model", n: "Act 2", title: "Add a model", what: "v2: build, push, roll out" },
-  { id: "upgrade", n: "Act 3", title: "Upgrade a model", what: "v3: build, push, roll out" },
-  { id: "patch", n: "Act 4", title: "Patch unused model", what: "v4: build, push, roll out" },
+  { id: "add-model", n: "Act 2", title: "Add a model", what: "build v2, push and roll out" },
+  { id: "upgrade", n: "Act 3", title: "Upgrade a model", what: "build v3, push and roll out" },
+  { id: "patch", n: "Act 4", title: "Patch unused model", what: "build v4, push and roll out" },
 ];
 const UPDATES = [
   { act: "add-model", version: "v2", n: "Act 2" },
@@ -29,17 +29,17 @@ function narration(id) {
   const w = state.info?.scenario.words || {};
   return {
     deploy: `Every method builds v1, pushes it and starts the camera, which needs only ${w.needs}. ` +
-      "Docker and 2DFS download their image first (2DFS only the selected parts); eStargz and " +
-      "MitraFSnap start right away and fetch files as the app reads them.",
-    "add-model": `v2 adds ${w.added}. Every method rebuilds and pushes. Docker, eStargz and 2DFS then ` +
-      "stop the camera, pull v2 and start a new container; MitraFSnap updates the files of the " +
-      "running container, and the app loads the model while it keeps serving.",
-    upgrade: `v3 ships ${w.v3}. Docker and eStargz rebuild every layer after the changed one; 2DFS ` +
-      "and MitraFSnap rebuild only the changed part. Replacement restarts the camera again; " +
-      `MitraFSnap swaps the model in place, and ${w.visible_v3}.`,
-    patch: "v4 replaces a 528 MB model this camera never loads. Docker downloads it again and every " +
-      "replacement method restarts the camera; MitraFSnap's refresh fetches only the new file index " +
-      "(a few KB) and the camera never stops.",
+      "Docker downloads the whole image before it starts, and 2DFS downloads the selected parts. " +
+      "eStargz and MitraFSnap start at once and fetch each file when the app first reads it.",
+    "add-model": `v2 adds ${w.added}, and every method rebuilds and pushes. Docker, eStargz and ` +
+      "2DFS then stop the camera, pull v2 and start a new container. MitraFSnap updates the files " +
+      "behind the running container, and the app loads the new model while the camera keeps running.",
+    upgrade: `v3 ships ${w.v3}. Docker and eStargz rebuild every layer after the changed one, while ` +
+      "2DFS and MitraFSnap rebuild only the changed allotment. The replacement methods restart the " +
+      `camera again. MitraFSnap swaps the model in place, and ${w.visible_v3}.`,
+    patch: "v4 replaces a 528 MB model that this camera never loads. Docker downloads it again, and " +
+      "every replacement method restarts the camera. The MitraFSnap refresh fetches only the new " +
+      "file index of a few KB, so the camera does not stop.",
     reset: "Clearing every lane, image and cache, so the next run starts cold.",
     prepare: "Downloading the models and the clip, and building the base images.",
   }[id];
@@ -48,7 +48,7 @@ function narration(id) {
 // Workflow diagram: nodes and edges (viewBox 1300 x 262).
 const NODES = {
   build: [200, 45, "Build", "builder"], push: [340, 45, "Push", ""],
-  registry: [480, 45, "Registry", "2dfs-registry"], pull: [620, 45, "Pull", "eager / lazy"],
+  registry: [480, 45, "Registry", "stores all images"], pull: [620, 45, "Pull", "eager / lazy"],
   start: [760, 45, "Start", "container"], load: [900, 45, "Load models", "app opens files"],
   r_stop: [620, 135, "Stop", "old container"], r_pull: [760, 135, "Pull new", ""],
   r_start: [900, 135, "Start", "new container"], r_load: [1040, 135, "Load models", "cold"],
@@ -301,7 +301,7 @@ function renderControls() {
   $("#link").value = String(info.settings.link_mbit || 0);
   $("#link").disabled = !info.link.emulated;
   $("#link").title = info.link.emulated ? "bandwidth between the registry and the lanes"
-    : `the registry is on another machine (${info.link.registry}); the real network is the link`;
+    : `the registry runs on another machine (${info.link.registry}), so the lanes use the real network`;
   $("#registry").value = info.settings.registry || "";
   $("#builder").value = info.settings.builder || "";
   const acc = info.backend.accelerators;
@@ -682,13 +682,13 @@ function renderCharts() {
       "↓ less is better", empty(data.downtime) ? wait("from Act 2") : hbars(data.downtime, secs)),
     figure("Time until a change is live", "from the start of each act to the camera's first frame of the new version",
       "↓ lower is better", columns(data.toChange, sec)),
-    figure("Total time", "Act 1 to Act 4, from each act's start to the change being live",
+    figure("Total time", "sum over Acts 1 to 4 of the time until each change is live",
       "↓ less is better", empty(data.total) ? wait("after Act 1") : hbars(data.total, secs)),
-    figure("Total build and push time", "every version built so far; Docker and eStargz rebuild every layer after a change",
+    figure("Total build and push time", "over all versions so far, Docker and eStargz rebuild every layer after a change",
       "↓ less is better", empty(data.builds) ? wait("after Act 1") : hbars(data.builds, secs)),
-    figure("Downloaded over the link", "cumulative; lazy methods fetch only what the app reads",
+    figure("Downloaded over the link", "cumulative, the lazy methods fetch only the files the app reads",
       "↓ less is better", lines((k) => state.lanes[k].series, meg)),
-    figure("Downtime per update", "seconds without output while each update rolled out",
+    figure("Downtime per update", "seconds without output during each update",
       "↓ less is better", columns(data.downtimeEach, sec)),
   ].join("");
   for (const hit of box.querySelectorAll("rect.hit")) wireCrosshair(hit);
@@ -729,10 +729,10 @@ function wireCrosshair(hit) {
 // Title cards for recorded videos: ?intro=1 (setup) or ?intro=2 (the acts),
 // with &speed=N for the playback speed.
 const ABOUT = {
-  docker: "pulls the whole image, then starts; updates by replacing the container",
-  estargz: "starts lazily and fetches files on first read; updates by replacing the container",
-  twodfs: "pulls only the selected parts of the image; updates by replacing the container",
-  mitrafsnap: "fetches the selected parts lazily; updates the running container's files in place",
+  docker: "pulls the whole image before it starts and replaces the container on an update",
+  estargz: "starts lazily, fetches each file on first read and replaces the container on an update",
+  twodfs: "pulls only the selected parts of the image and replaces the container on an update",
+  mitrafsnap: "fetches the selected parts lazily and updates the files of the running container in place",
 };
 
 function renderIntro(slide, speed) {
@@ -750,8 +750,8 @@ function renderIntro(slide, speed) {
       <p class="facts">All ${shown().length} methods build the same image and run at the same time on one
         machine (${info.backend.arch}, ${info.backend.cpus} CPUs, ${DEVICE_NAME[effectiveDevice()]} inference),
         pulling over ${link} link.</p>
-      <p class="speed">This video plays at <strong>${speed}× speed</strong>. Every time shown in the
-        dashboard is measured in real time.</p>`;
+      <p class="speed">This video plays at <strong>${speed}× speed</strong>. The dashboard measures
+        every time in real time.</p>`;
   } else {
     box.innerHTML = `<p class="kicker">MitraFSnap live demo · ${info.scenario.title}</p>
       <h1>Four acts</h1>
@@ -900,7 +900,7 @@ $("#apply-machines").onclick = async () => {
   try {
     await api("/api/settings", { registry: $("#registry").value.trim(), builder: $("#builder").value.trim(),
       builder_token: $("#builder-token").value });
-    log("machines updated; Act 1 prepares the builder and registry");
+    log("machines updated, Act 1 prepares the builder and the registry");
     await connect();
   } catch (err) { log(`machines: ${err.message}`); $("#narration").textContent = err.message; }
 };
@@ -910,7 +910,7 @@ $("#link").onchange = async (e) => {
 $("#device").onchange = async (e) => {
   try {
     await api("/api/settings", { device: e.target.value });
-    log(`device: ${e.target.value}; it applies from the next Act 1`);
+    log(`device ${e.target.value} applies from the next Act 1`);
   } catch (err) { log(err.message); e.target.value = state.info.settings.device; }
 };
 $("#scenario").onchange = async (e) => {

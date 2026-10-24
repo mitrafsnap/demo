@@ -1,7 +1,7 @@
 {
   "name": "people",
   "title": "People camera (webcam)",
-  "description": "A camera that watches people. v1 finds faces; v2 adds body pose; v3 ships an expression model that labels smiles; v4 patches a 528 MB model the camera never loads.",
+  "description": "A camera that watches people. v1 finds faces, v2 adds body pose, v3 ships an expression model that labels smiles, and v4 patches a 528 MB model that the camera never loads.",
   "frames": {
     "kind": "camera",
     "fps": 10,

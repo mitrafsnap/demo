@@ -1,189 +1,197 @@
 # MitraFSnap live demo
 
-A vision application deployed and updated four ways at once: Docker, eStargz, 2DFS and
-[MitraFSnap](https://github.com/mitrafsnap). Every method builds the same image, deploys it over
-the same emulated edge link and rolls out the same updates while a camera stream keeps running.
-The dashboard shows each method's video, where it is in the workflow, and live charts of what
-each one costs.
+This demo deploys and updates one vision application in four ways at the same time. Docker,
+eStargz, 2DFS and [MitraFSnap](https://github.com/mitrafsnap) build the same image, deploy it
+over the same emulated edge link and roll out the same updates while a camera stream runs. The
+dashboard shows the video of each method, its position in the workflow, and live charts of the
+time and data each update costs.
 
-![Rolling out an update: replacement lanes go dark, MitraFSnap keeps serving](docs/traffic-highlight.gif)
+![Rolling out an update. The replacement methods stop serving while MitraFSnap keeps running.](docs/traffic-highlight.gif)
 
-Above: Act 3 at real speed. Docker, eStargz and 2DFS stop their containers to roll out a new
-detector; MitraFSnap updates the running container and never stops serving.
+The excerpt above shows Act 3 at real speed. Docker, eStargz and 2DFS stop their containers to
+roll out a new detector. MitraFSnap updates the files behind the running container, and its
+camera never stops.
 
-Full runs, all four acts with all four methods. Each opens with what the acts are and how fast
-it plays:
+Both scenarios are also recorded in full, with all four acts and all four methods. Each video
+starts with a short description of the acts and plays at 2x speed.
 
-- ▶ **[Traffic camera (MP4)](docs/traffic.mp4)** · [GIF excerpt](docs/traffic-highlight.gif)
-- ▶ **[People camera (MP4)](docs/people.mp4)** · [GIF excerpt](docs/people-highlight.gif)
+- [Traffic camera (MP4)](docs/traffic.mp4) and its [GIF excerpt](docs/traffic-highlight.gif)
+- [People camera (MP4)](docs/people.mp4) and its [GIF excerpt](docs/people-highlight.gif)
 
-The videos are 1280 px wide and play at 2× speed. `tools/encode.sh` also writes full-resolution
-versions, which are not in the repository.
+The videos in the repository are 1280 px wide. `tools/encode.sh` also writes full resolution
+versions, which we do not commit.
 
-## What the demo shows
+## Scenarios and acts
 
-Two scenarios, picked in the dashboard's **Scenario** menu, run the same four acts:
+The dashboard offers two scenarios, and both run the same four acts.
 
-- **traffic**: a city camera at a busy crossing (recorded clip). v1 detects people and cars;
-  v2 adds instance segmentation (MobileSAM); v3 ships a stronger detector that also recognizes
-  bicycles, motorcycles, buses and trucks; v4 patches a 528 MB model the camera never loads.
-- **people**: a camera that watches people, fed by **your webcam** (or a recorded clip until
-  you turn it on). v1 finds faces; v2 adds body pose; v3 ships an expression model that labels
-  smiles; v4 patches the same unused model.
+The traffic scenario is a city camera at a busy crossing, played from a recorded clip. Version 1
+detects people and cars. Version 2 adds instance segmentation with MobileSAM. Version 3 ships a
+stronger detector that also recognizes bicycles, motorcycles, buses and trucks. Version 4
+patches a 528 MB model that the camera never loads.
 
-| Act | What happens | What MitraFSnap does differently |
+The people scenario watches people through your webcam, or through a recorded clip until you
+turn the webcam on. Version 1 finds faces, version 2 adds body pose, version 3 ships an
+expression model that labels smiles, and version 4 patches the same unused model.
+
+| Act | All methods | MitraFSnap |
 |---|---|---|
-| 1 Deploy v1 | every method builds v1, pushes it and starts the camera | starts before the image is downloaded and fetches only what the app reads |
-| 2 Add a model | v2 adds a model; every method rebuilds, pushes and rolls out | rebuilds one part, then updates the running container instead of restarting it |
-| 3 Upgrade a model | v3 replaces the detector (or adds the expression model) | same: Docker and eStargz rebuild every layer after the changed one and restart |
-| 4 Patch unused model | v4 replaces a 528 MB model the camera never loads | refreshes in milliseconds and downloads only the new file index |
+| 1. Deploy v1 | build v1, push it and start the camera | starts before the image is downloaded and fetches only the files the app reads |
+| 2. Add a model | rebuild, push and roll out v2 | rebuilds one allotment and updates the running container |
+| 3. Upgrade a model | rebuild, push and roll out v3 | rebuilds one allotment and updates the running container |
+| 4. Patch an unused model | rebuild, push and roll out v4 | fetches only the new file index of the changed layer |
 
-Docker rebuilds on every update, and BuildKit's cache keeps the layers before the changed one.
-The Dockerfile adds one layer per model in the order the models were introduced, so a change
-invalidates every layer after it. Each lane's card shows how many layers or allotments its
-latest build rebuilt.
+Docker and eStargz rebuild on every update. BuildKit keeps the cached layers before the
+changed one, but the Dockerfile adds one layer per model in the order the models were
+introduced, so a change invalidates every layer after it. 2DFS and MitraFSnap rebuild only the
+allotment of the changed model. Each lane card shows how many layers or allotments the builds
+rebuilt.
 
-### What is measured
+### Measurements
 
-Every number on the page comes from the same event times (`measure()` in
-[dashboard/app.js](dashboard/app.js), and the same definitions in
-[tools/summary.py](tools/summary.py)):
+All numbers on the dashboard come from the same event times. The definitions are in
+`measure()` in [dashboard/app.js](dashboard/app.js), and
+[tools/summary.py](tools/summary.py) applies the same ones to a recorded trace.
 
-- **Time until a change is live**: from the start of an act (the build begins) to the lane's
-  first frame of the new version. For Act 1, to the first frame at all.
-- **Downtime**: gaps of more than a second without output inside that window. Shorter gaps
-  are slow frames on a busy machine, not an outage.
-- **Total time**: time until the change is live, summed over the four acts.
-- **Total build and push**: build plus push time, summed over every version. The lane card
-  also counts the layers or allotments rebuilt across those builds.
-- **Downloaded**: bytes the lane pulled over the emulated link.
+- The time until a change is live runs from the start of an act, when the build begins, to the
+  first frame of the new version. For Act 1 it ends at the first frame of the lane.
+- Downtime counts the gaps of more than one second without output inside that interval.
+  Shorter gaps occur when a busy machine delivers a frame late.
+- The total time is the sum of the time until a change is live over the four acts.
+- The total build and push time sums the build and push of every version.
+- The download counts the bytes a lane pulled over the emulated link.
 
-One traffic run on a MacBook Pro (M4 Pro, 14 CPUs, Apple GPU helper, 200 Mbit/s emulated
-link, all four methods at once):
+We ran the traffic scenario on a MacBook Pro (M4 Pro, 14 CPUs) with the Apple GPU helper and a
+200 Mbit/s emulated link, with all four methods at once.
 
 | | Docker | eStargz | 2DFS | MitraFSnap |
 |---|---:|---:|---:|---:|
-| Act 1 until first frame | 70.2 s | 40.3 s | 24.0 s | **16.6 s** |
-| Act 2 (add segmenter) live after | 29.0 s | 29.7 s | 10.3 s | **8.3 s** |
-| Act 3 (upgrade detector) live after | 36.2 s | 36.1 s | 13.7 s | **12.6 s** |
-| Act 4 (patch unused model) live after | 72.7 s | 43.2 s | 20.2 s | **15.2 s** |
+| Act 1, until the first frame | 70.2 s | 40.3 s | 24.0 s | **16.6 s** |
+| Act 2, until the segmenter is live | 29.0 s | 29.7 s | 10.3 s | **8.3 s** |
+| Act 3, until the new detector is live | 36.2 s | 36.1 s | 13.7 s | **12.6 s** |
+| Act 4, until the patch is live | 72.7 s | 43.2 s | 20.2 s | **15.2 s** |
 | Total downtime, Acts 2 to 4 | 73.5 s | 26.1 s | 12.8 s | **0 s** |
 | Total time, all acts | 208.1 s | 149.3 s | 68.3 s | **52.8 s** |
 | Total build and push | 84.5 s | 109.0 s | 41.1 s | **34.6 s** |
 | Downloaded | 1475 MB | 679 MB | 227 MB | **173 MB** |
 
-The people run gives the same order: MitraFSnap has no downtime and the lowest total time
-(49.7 s, against 209.0 s for Docker, 213.5 s for eStargz and 67.4 s for 2DFS).
+The people scenario gives the same order. MitraFSnap has no downtime and needs 49.7 s in total,
+compared with 209.0 s for Docker, 213.5 s for eStargz and 67.4 s for 2DFS.
 
-These are live-mode numbers: the four methods share one machine's CPU, GPU and link, so treat
-them as a demonstration rather than a benchmark. The paper's evaluation measures each method
-alone.
+The four methods share the CPU, the GPU and the link of one machine in this mode, so these
+numbers illustrate the behavior of each method and should not be read as a benchmark. The
+paper evaluates each method in isolation.
 
-## Run it
+## Running the demo
 
-You need Docker with privileged containers and `/dev/fuse`: Docker Desktop on macOS, or Docker
-Engine on Linux (x86_64 or arm64). Plan for about 15 GB of free disk and 8 GB of memory for four
-lanes; two lanes need about half.
+The demo needs Docker with privileged containers and `/dev/fuse`. Docker Desktop on macOS and
+Docker Engine on Linux (x86_64 or arm64) both work. Four lanes need about 15 GB of disk and
+8 GB of memory, and two lanes need about half of that.
 
 ```sh
 git clone https://github.com/mitrafsnap/demo.git
 cd demo
-tools/accel/run.sh              # macOS only, in its own terminal: runs the models on the Mac's GPU
-docker compose up -d --build    # the backend
+tools/accel/run.sh              # macOS only, in a separate terminal, runs the models on the GPU
+docker compose up -d --build    # starts the backend
 ```
 
-The first build compiles the MitraFSnap snapshotter, the 2DFS builder and the registry from the
-`mitrafsnap` repositories and takes a few minutes. Then open **<http://localhost:8080>**:
+The first build compiles the MitraFSnap snapshotter, builder and registry from their
+repositories and takes a few minutes. The dashboard is then at <http://localhost:8080>.
 
-1. Pick a **Scenario** and the **Methods**. Docker and MitraFSnap are shown by default;
-   **Show all** adds eStargz and 2DFS.
-2. Click **Act 1** to **Act 4** in order. Each act ends when every lane shows its result.
-   Act 1 starts from a clean state every time; the first Act 1 also downloads the models and the
-   clip (about 1.3 GB) and builds the base images, which takes several minutes.
-3. **Reset** clears all lanes, images and caches without starting a new run.
+1. Choose a scenario and the methods to show. The dashboard shows Docker and MitraFSnap by
+   default, and "Show all" adds eStargz and 2DFS.
+2. Run Act 1 to Act 4 in order. An act ends when every lane shows its result. Act 1 always
+   starts from a clean state. The first Act 1 also downloads the models and the clip (about
+   1.3 GB) and builds the base images, which takes several minutes.
+3. Reset clears all lanes, images and caches.
 
-**Edge link** sets the bandwidth between the registry and the lanes; lower values make the
-differences easier to see. To use your webcam, pick the **people** scenario and click **Use my
-webcam**. Browsers only allow the camera on `https` or `localhost` pages.
+The edge link setting limits the bandwidth between the registry and the lanes, and a lower
+value makes the differences easier to see. To use your webcam, select the people scenario and
+click "Use my webcam". Browsers allow the camera only on `https` or `localhost` pages.
 
-### Stop it
+### Stopping the demo
 
 ```sh
-docker compose down       # stop the backend; models, images and caches are kept
-docker compose down -v    # stop it and delete everything it downloaded and built
+docker compose down       # stops the backend and keeps models, images and caches
+docker compose down -v    # also deletes everything the demo downloaded and built
 ```
 
-Stop the Apple GPU helper with Ctrl-C in its terminal. `docker compose ps` shows what is running.
+The Apple GPU helper stops with Ctrl-C in its terminal, and `docker compose ps` lists what is
+still running.
 
-### GPU
+### GPUs
 
-The **Device** setting is `auto` by default: the lanes run their models on a GPU when the
-backend has one, and on the CPU otherwise. `Apple GPU`, `NVIDIA GPU` and `CPU` force one (a
-device that isn't found is greyed out); the choice applies from the next Act 1. The status pill
-at the top right shows which one is in use.
+The device setting defaults to `auto`, which runs the models on a GPU when the backend has one
+and on the CPU otherwise. The other options force the Apple GPU, an NVIDIA GPU or the CPU, and
+a device the backend does not have is greyed out. A new choice takes effect at the next Act 1,
+and the status label at the top right shows the device in use.
 
-**Mac (Apple GPU).** Docker Desktop's Linux VM has no GPU, so `tools/accel/run.sh` runs a small
-helper natively on macOS that executes the models with ONNX Runtime's CoreML provider. The lanes
-still read every model file from their own container mount, so lazy fetching and in-place
-refresh work exactly as without it; only the arithmetic moves to the helper. Act 1 compiles every
-model once, so no lane pays CoreML's compile time during an update.
+Docker Desktop runs containers in a Linux VM without GPU access. On a Mac, `tools/accel/run.sh`
+therefore starts a small helper on macOS itself, which executes the models with the CoreML
+provider of ONNX Runtime. The lanes still read every model file from their own container mount,
+so lazy fetching and refresh behave exactly as without the helper, and only the computation
+moves to the GPU. Act 1 compiles every model once, so no update pays the CoreML compile time.
 
-**NVIDIA.** On a machine with an NVIDIA GPU and the
-[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/):
+On a machine with an NVIDIA GPU and the
+[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/),
+start the backend with the GPU override.
 
 ```sh
 docker compose -f compose.yaml -f compose.gpu.yaml up -d --build
 ```
 
-The lane runtime is then built with CUDA-enabled ONNX Runtime 1.31 (CUDA 13), so the host needs
-an NVIDIA driver with CUDA 13 support. This covers the **DGX Spark** (arm64) and **x86 servers**
-such as A100 or H100 machines with a current driver. **Jetson** boards are not covered yet: they
-need NVIDIA's Jetson builds of ONNX Runtime and the JetPack libraries instead of the PyPI wheels,
-which means a different lane base image. NVIDIA mode has not been tested on hardware yet.
+The lane runtime then uses ONNX Runtime 1.31 with CUDA 13, so the host needs a driver that
+supports CUDA 13. This should cover the DGX Spark (arm64) and x86 servers with A100 or H100
+GPUs. We have not tested the NVIDIA mode on hardware yet. Jetson boards need NVIDIA's own ONNX
+Runtime builds and the JetPack libraries, and therefore a different lane base image, which the
+demo does not provide yet.
 
-### Run the parts on separate machines
+### Running the parts on separate machines
 
-By default everything runs on one machine. Each part can move to its own machine, and every
-machine runs the same backend (`docker compose up -d --build`):
+By default the whole demo runs on one machine. The app backend, the registry and the builder
+can each move to another machine, and every machine runs the same backend with
+`docker compose up -d --build`.
 
-- **App backend**: runs the lanes, plays the camera feed and coordinates the acts. The dashboard
-  connects to it (the **Backend** field at the top), for example a DGX Spark next to the camera:
-
-  ```sh
-  DEMO_BIND=0.0.0.0 DEMO_TOKEN=choose-a-secret docker compose up -d --build
-  ```
-
-  Then open `http://<machine>:8080/?token=choose-a-secret`. An SSH tunnel
-  (`ssh -L 8080:localhost:8080 <machine>`) also works, and is the easiest way to use your webcam
-  with a remote backend.
-- **Registry**: under **Machines**, set **Registry** to `host:port` of a registry both the app
-  and the builder can reach. The registry of any demo backend works; start that backend
-  with `DEMO_REGISTRY_BIND=0.0.0.0` so other machines can reach it.
-- **Builder**: set **Builder** to the URL of another demo backend, and **token** to its
-  `DEMO_TOKEN` if it has one. The app backend then asks that machine to prepare the base images
-  and run every build, and streams each build's phases back into the dashboard.
-
-Edge-link emulation only applies when the registry runs on the app's machine: with a registry
-elsewhere, the lanes pull over the real network, **Edge link** shows "real network", and nothing
-is throttled. Downloads are still counted per method. Changing a machine applies from the next
-Act 1.
-
-### Drive it from a terminal
+The app backend runs the lanes, plays the camera feed and coordinates the acts, and the
+dashboard connects to it through the Backend field. To reach a backend on another machine, for
+example a DGX Spark next to the camera, start it with a token.
 
 ```sh
-tools/demo.py lanes docker estargz twodfs mitrafsnap    # choose methods
-tools/demo.py act deploy add-model upgrade patch       # run the four acts
-tools/demo.py trace | tools/summary.py                  # per-lane numbers
+DEMO_BIND=0.0.0.0 DEMO_TOKEN=choose-a-secret docker compose up -d --build
 ```
 
-`tools/demo.py set 'scenario="people"'` switches scenarios; `DEMO_BACKEND` and `DEMO_TOKEN`
-point it at a remote backend. `tools/record.py` captures the dashboard in a headless browser
-(including the intro cards) and `tools/encode.sh` turns the frames into the videos and GIFs.
+Then open `http://<machine>:8080/?token=choose-a-secret`. An SSH tunnel
+(`ssh -L 8080:localhost:8080 <machine>`) also works, and it is the simplest way to use a
+webcam with a remote backend.
 
-### Build from local clones
+The Machines row of the dashboard sets the other two parts. The registry field takes the
+`host:port` of a registry that both the app backend and the builder can reach. Any demo
+backend can serve as the registry if it was started with `DEMO_REGISTRY_BIND=0.0.0.0`. The
+builder field takes the URL of another demo backend, plus its `DEMO_TOKEN` if it has one. The
+app backend then sends the base image preparation and every build to that machine and streams
+the build phases back into the dashboard.
+
+The edge link emulation applies only when the registry runs on the app's machine. With a
+remote registry the lanes pull over the real network, the edge link setting shows "real
+network", and the demo still counts the downloaded bytes of each method. A change to the
+machines takes effect at the next Act 1.
+
+### Command line
+
+```sh
+tools/demo.py lanes docker estargz twodfs mitrafsnap    # choose the methods
+tools/demo.py act deploy add-model upgrade patch       # run the four acts
+tools/demo.py trace | tools/summary.py                  # numbers per lane
+```
+
+`tools/demo.py set 'scenario="people"'` switches the scenario, and `DEMO_BACKEND` and
+`DEMO_TOKEN` point the tool to a remote backend. `tools/record.py` captures the dashboard in a
+headless browser, and `tools/encode.sh` turns the captured frames into the videos and GIFs.
+
+### Building from local clones
 
 To test changes to the snapshotter, the builder or the registry, clone them next to this
-repository and use the override file:
+repository and use the override file.
 
 ```sh
 cp compose.override.example.yaml compose.override.yaml
@@ -191,108 +199,104 @@ docker compose up -d --build
 ```
 
 The override also mounts `controller/`, `dashboard/`, `scenarios/`, `lane/` and `models/` into
-the node, so `docker compose restart node` picks up edits without rebuilding.
+the node, so `docker compose restart node` picks up edits without a rebuild.
 
-## How it runs
+## How the demo runs
 
 ```text
 your machine
-├─ tools/accel/run.sh       macOS only: runs the models on the Mac's GPU (CoreML)
+├─ tools/accel/run.sh       macOS only, runs the models on the Mac's GPU (CoreML)
 └─ Docker
-   ├─ registry              2dfs-registry, the MitraFSnap fork: stores all four images
-   └─ node                  one privileged container that is a small "edge device":
+   ├─ registry              MitraFSnap registry, stores the images of all four methods
+   └─ node                  one privileged container that acts as the edge device
       ├─ containerd         its own container runtime, separate from Docker's
-      ├─ snapshotters       overlayfs (Docker, 2DFS lanes) and the MitraFSnap
-      │                     snapshotter (eStargz and MitraFSnap lanes, lazy and refresh)
-      ├─ BuildKit, tdfs     the builders: BuildKit for Docker and eStargz, tdfs for 2DFS
-      │                     and MitraFSnap
+      ├─ snapshotters       overlayfs for the Docker and 2DFS lanes, the MitraFSnap
+      │                     snapshotter for the eStargz and MitraFSnap lanes
+      ├─ BuildKit, tdfs     BuildKit builds for Docker and eStargz, tdfs for 2DFS and
+      │                     MitraFSnap
       ├─ controller         HTTP API and dashboard on :8080, runs the acts, plays the
-      │                     camera feed, emulates the edge link, records the trace
+      │                     camera feed, emulates the edge link and records the trace
       └─ lane containers    one per method, all running the same vision app
 ```
 
-**Why containers inside a container?** The comparison is about how a container runtime pulls,
-mounts and updates images, so each method needs a runtime it fully controls: MitraFSnap's
-snapshotter, a FUSE mount per lazy image, and refresh on a mounted snapshot. Docker on your
-machine can't do that, and on macOS it runs inside a Linux VM anyway. So Docker only starts two
-containers, the registry and the node, and the node runs its own containerd with the four
-lanes. `docker compose down` stops all of it, lanes included. The lanes don't appear in
-`docker ps`, because they belong to the node's containerd; to look at them:
+The demo compares how a container runtime pulls, mounts and updates images, so every method
+needs a runtime that the demo controls completely. MitraFSnap requires its own snapshotter, a
+FUSE mount per lazy image and refresh on a mounted snapshot. The Docker installation on your
+machine cannot provide these, and on macOS it runs inside a Linux VM anyway. Docker therefore
+starts only two containers, the registry and the node, and the node runs its own containerd
+with the four lanes. `docker compose down` stops all of them. The lanes do not appear in
+`docker ps` because they belong to the containerd inside the node, and the following command
+lists them.
 
 ```sh
 docker compose exec node ctr -n mitrafsnap tasks ls     # namespaces: docker, estargz, twodfs, mitrafsnap
 ```
 
-More detail:
+All four methods start from the same lane runtime. Docker and eStargz build with BuildKit, with
+one layer per model, and 2DFS and MitraFSnap build one allotment per model with `tdfs`. Each
+method runs in its own containerd namespace with content sharing disabled, so no lane reuses
+the downloads of another. The lanes pull through a proxy in the controller, which has one port
+per method to count bytes and a shared token bucket to limit the bandwidth. The builders push
+to the registry directly.
 
-- **Same app, four pipelines.** Docker and eStargz build with BuildKit (one layer per model);
-  2DFS and MitraFSnap build one allotment per model with `tdfs`. All four start from the same
-  lane runtime.
-- **No sharing between methods.** Each method runs in its own containerd namespace with content
-  sharing turned off, so no lane can reuse another lane's downloads.
-- **One link for everyone.** Lanes pull through the controller's proxy: one port per method for
-  byte counting, a shared token bucket for the bandwidth. Builders push to the registry directly.
-- **Same frames for everyone.** The controller plays the clip (or the webcam) at 10 fps and every
-  lane processes the same frames; a lane that isn't serving drops them.
-- **The app picks up updates itself.** The lane app reopens `/models/config.json` five times a
-  second and reloads any model whose digest changed. Each model runs in its own worker process,
-  so the old model keeps serving while the new one loads. Replacement lanes see the new version
-  when their container restarts; MitraFSnap lanes see it behind the running mount after
-  `ctr-remote refresh`.
+The controller plays the clip or the webcam at 10 fps, and every lane receives the same frames.
+A lane that is not serving drops them. The lane app reads `/models/config.json` five times a
+second and reloads every model whose digest changed. Each model runs in its own worker process,
+so the old model serves until the new one is loaded. A replacement lane sees the new version
+after its container restarts. A MitraFSnap lane sees it behind the running mount after
+`ctr-remote refresh`.
 
-### Measuring fairly
+### Fairness
 
-- Live mode runs all shown methods at once on one machine; they compete for CPU, GPU, disk and
-  the link. That is part of the picture an audience sees, not a clean measurement.
-- The Dockerfile adds the models in the order they were introduced. Putting the model that
-  changes last would be Docker's best case for that one update, but a Dockerfile can only favor
-  one model.
-- The eStargz lane uses stock `ctr-remote rpull` behaviour, including its 10 MB default prefetch
-  per layer.
-- Act 1 clears every lane image, snapshot and cache, and the build caches, so each run starts
-  cold.
+All methods shown in the dashboard run at once on one machine and compete for the CPU, the GPU,
+the disk and the link. An audience sees this contention, so we keep it in the live demo, but it
+also means that the numbers differ between runs. The Dockerfile adds the models in the order
+they were introduced. Placing the changed model last would give Docker its best case for one
+update, but a single Dockerfile can favor only one model. The eStargz lane uses the default
+behavior of `ctr-remote rpull`, which includes a 10 MB prefetch per layer. Act 1 removes every
+image, snapshot and cache of the lanes, as well as the build caches, so each run starts cold.
 
 ## Platform notes
 
-- **Docker Desktop (macOS).** Its LinuxKit kernel fails every exec through overlayfs on a FUSE
-  layer that supports xattrs. The node detects this kernel and enables the snapshotter's
-  `[fuse] disable_xattrs` option, which exists only in the MitraFSnap fork.
-- **Raspberry Pi 5.** Works on the CPU; expect a few frames per second per lane with four lanes.
+The LinuxKit kernel of Docker Desktop fails every exec through an overlayfs on top of a FUSE
+layer that supports extended attributes. The node detects this kernel and enables the
+`[fuse] disable_xattrs` option of the MitraFSnap snapshotter, which upstream does not have. On
+a Raspberry Pi 5 the demo runs on the CPU at a few frames per second per lane with four lanes.
 
 ## Troubleshooting
 
-- `docker compose logs node` shows the controller; daemon and lane logs are in `/var/log/node/`
-  inside the node (`docker compose exec node tail /var/log/node/lane-docker.log`).
-- If an act fails, its error is in the dashboard's event log. Run Act 1 again to start over.
-- The dashboard reconnects and reloads by itself if the backend restarts.
+`docker compose logs node` shows the controller log. The logs of the daemons and lanes are in
+`/var/log/node/` inside the node, for example
+`docker compose exec node tail /var/log/node/lane-docker.log`. A failed act reports its error
+in the event log of the dashboard, and running Act 1 again starts over. When the backend
+restarts, the dashboard reconnects and reloads its state.
 
 ## Layout
 
 ```text
-compose.yaml      backend stack (compose.gpu.yaml adds an NVIDIA GPU)
-node/             node image: containerd, snapshotter, BuildKit, tdfs; smoke-test.sh
-controller/       API, acts, methods, emulated link, frame source
+compose.yaml      backend stack, compose.gpu.yaml adds an NVIDIA GPU
+node/             node image with containerd, snapshotter, BuildKit and tdfs, and a smoke test
+controller/       API, acts, methods, emulated link and frame source
 lane/             vision app and its runtime image
-dashboard/        static dashboard (HTML, CSS, JS, no build step)
-scenarios/        scenario definitions: models, versions, wording, licenses
-models/export/    prepares ONNX models during Act 1 (pins MobileSAM's input shapes)
-tools/            CLI, trace summary, screenshots, recording and encoding
+dashboard/        static dashboard in HTML, CSS and JS without a build step
+scenarios/        scenario definitions with models, versions, wording and licenses
+models/export/    prepares ONNX models during Act 1 and pins the input shapes of MobileSAM
+tools/            command line, trace summary, screenshots, recording and encoding
 tools/accel/      Apple GPU helper for macOS
-DESIGN.md         design notes
 ```
 
 ## Credits
 
-Clips, from Wikimedia Commons:
+The clips are from Wikimedia Commons:
 [DiagonalCrosswalkYongeDundas.webm](https://commons.wikimedia.org/wiki/File:DiagonalCrosswalkYongeDundas.webm)
 (CC0) and
 [AFN InFocus- DDG117 holds Sevillanas dance Classes](https://commons.wikimedia.org/wiki/File:AFN_InFocus-_DDG117_holds_Sevillanas_dance_Classes_(960160).webm)
 (public domain, U.S. Department of Defense).
 
-Models: YOLOX (Megvii, Apache-2.0); MobileSAM (Apache-2.0; ONNX export by Acly on Hugging Face,
-MIT); YuNet (OpenCV Zoo, MIT); RTMPose-m (OpenMMLab, Apache-2.0); FER+, ResNet-152 v2, VGG-16 and
-VGG-16-BN from the ONNX Model Zoo (FER+ MIT, the others Apache-2.0). The dashboard lists the
-assets of the selected scenario.
+The models are YOLOX (Megvii, Apache-2.0), MobileSAM (Apache-2.0, ONNX export by Acly on
+Hugging Face, MIT), YuNet (OpenCV Zoo, MIT), RTMPose-m (OpenMMLab, Apache-2.0), and FER+,
+ResNet-152 v2, VGG-16 and VGG-16-BN from the ONNX Model Zoo (FER+ under MIT, the others under
+Apache-2.0). The dashboard lists the assets of the selected scenario.
 
-Font: [CMU Sans Serif](https://ctan.org/pkg/cm-unicode) (SIL Open Font License,
-`dashboard/fonts/OFL.txt`). Method colors follow the paper's figures.
+The font is [CMU Sans Serif](https://ctan.org/pkg/cm-unicode) under the SIL Open Font License
+(`dashboard/fonts/OFL.txt`). The method colors follow the figures of the paper.

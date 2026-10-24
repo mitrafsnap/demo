@@ -10,7 +10,7 @@ name: mitrafsnap-demo
 services:
   registry:
     build:
-      context: https://github.com/mitrafsnap/2dfs-registry.git#main
+      context: https://github.com/mitrafsnap/registry.git#main
     environment:
       OTEL_TRACES_EXPORTER: none
     volumes:
@@ -24,8 +24,8 @@ services:
       context: node
       additional_contexts:
         demo: .
-        snapshotter: https://github.com/mitrafsnap/stargz-snapshotter.git#demo
-        builder: https://github.com/mitrafsnap/2dfs-builder.git#main
+        snapshotter: https://github.com/mitrafsnap/snapshotter.git#main
+        builder: https://github.com/mitrafsnap/builder.git#main
     privileged: true
     cgroup: host
     devices:

@@ -4,8 +4,8 @@
 # The demo's lane containers run in this containerd, not in the host engine.
 #
 # Named build contexts (set in compose.yaml):
-#   snapshotter  mitrafsnap/stargz-snapshotter
-#   builder      mitrafsnap/2dfs-builder
+#   snapshotter  mitrafsnap/snapshotter
+#   builder      mitrafsnap/builder
 
 ARG GO_VERSION=1.25
 ARG UBUNTU_VERSION=24.04
