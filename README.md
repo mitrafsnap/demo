@@ -1,7 +1,16 @@
+<p align="center">
+  <a href="https://mitrafsnap.github.io"><img src="https://img.shields.io/badge/Project%20page-mitrafsnap.github.io-cc3333" alt="Project page"></a>
+  <a href="https://github.com/mitrafsnap/demo"><img src="https://img.shields.io/badge/Live%20demo-mitrafsnap%2Fdemo-cc3333" alt="Live demo"></a>
+</p>
+
 # MitraFSnap live demo
 
+> Part of **MitraFSnap**, Build Less, Pull Less, Restart Never: Fast Container Image
+> Distribution and In-Place Updates. The paper is under review.
+> [Project page, videos and results](https://mitrafsnap.github.io)
+
 This demo deploys and updates one vision application in four ways at the same time. Docker,
-eStargz, 2DFS and [MitraFSnap](https://github.com/mitrafsnap) build the same image, deploy it
+eStargz, 2DFS and [MitraFSnap](https://mitrafsnap.github.io) build the same image, deploy it
 over the same emulated edge link and roll out the same updates while a camera stream runs. The
 dashboard shows the video of each method, its position in the workflow, and live charts of the
 time and data each update costs.
@@ -20,6 +29,14 @@ starts with a short description of the acts and plays at 2x speed.
 
 The videos in the repository are 1280 px wide. `tools/encode.sh` also writes full resolution
 versions, which we do not commit.
+
+| Repository | Role in MitraFSnap |
+|---|---|
+| [builder](https://github.com/mitrafsnap/builder) | builds independent, lazy loadable allotments and their chunk indexes |
+| [registry](https://github.com/mitrafsnap/registry) | turns a partition selection into prefetch hints over the complete image |
+| [snapshotter](https://github.com/mitrafsnap/snapshotter) | lazy pulling and refresh of running containers |
+| **demo** (this repository) | live demo that compares Docker, eStargz, 2DFS and MitraFSnap |
+| [evaluation](https://github.com/mitrafsnap/evaluation) | build, pull and update benchmarks |
 
 ## Scenarios and acts
 
