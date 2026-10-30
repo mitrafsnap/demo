@@ -111,11 +111,13 @@ Docker Engine on Linux (x86_64 or arm64) both work. Four lanes need about 15 GB 
 git clone https://github.com/mitrafsnap/demo.git
 cd demo
 tools/accel/run.sh              # macOS only, in a separate terminal, runs the models on the GPU
-docker compose up -d --build    # starts the backend
+docker compose up -d            # starts the backend
 ```
 
-The first build compiles the MitraFSnap snapshotter, builder and registry from their
-repositories and takes a few minutes. The dashboard is then at <http://localhost:8080>.
+The first start builds the two images of the backend. It compiles the MitraFSnap snapshotter,
+builder and registry from their repositories and takes a few minutes. Later starts reuse these
+images and take seconds. After pulling a new version of this repository, rebuild them with
+`docker compose up -d --build`. The dashboard is at <http://localhost:8080>.
 
 1. Choose a scenario and the methods to show. The dashboard shows Docker and MitraFSnap by
    default, and "Show all" adds eStargz and 2DFS.
@@ -132,11 +134,12 @@ click "Use my webcam". Browsers allow the camera only on `https` or `localhost` 
 
 ```sh
 docker compose down       # stops the backend and keeps models, images and caches
-docker compose down -v    # also deletes everything the demo downloaded and built
+docker compose down -v    # also deletes the downloaded models and the caches
 ```
 
 The Apple GPU helper stops with Ctrl-C in its terminal, and `docker compose ps` lists what is
-still running.
+still running. Neither command removes the two built images, so the next `docker compose up -d`
+starts without a build. `docker compose down --rmi local` removes them as well.
 
 ### GPUs
 
@@ -156,7 +159,7 @@ On a machine with an NVIDIA GPU and the
 start the backend with the GPU override.
 
 ```sh
-docker compose -f compose.yaml -f compose.gpu.yaml up -d --build
+docker compose -f compose.yaml -f compose.gpu.yaml up -d
 ```
 
 The lane runtime then uses ONNX Runtime 1.31 with CUDA 13, so the host needs a driver that
@@ -169,7 +172,7 @@ demo does not provide yet.
 
 By default the whole demo runs on one machine. The backend, the registry and the builder can
 each move to another machine, and every machine runs the same stack with
-`docker compose up -d --build`. The Machines row at the top of the dashboard has one field for
+`docker compose up -d`. The Machines row at the top of the dashboard has one field for
 each of them. An empty field means the machine that serves the dashboard, and Apply takes
 effect for all three at once.
 
@@ -178,7 +181,7 @@ talks to it through the Backend field. To reach a backend on another machine, fo
 DGX Spark next to the camera, start it with a token.
 
 ```sh
-DEMO_BIND=0.0.0.0 DEMO_TOKEN=choose-a-secret docker compose up -d --build
+DEMO_BIND=0.0.0.0 DEMO_TOKEN=choose-a-secret docker compose up -d
 ```
 
 Then open `http://<machine>:8080/?token=choose-a-secret`, or enter the URL and the token in the
